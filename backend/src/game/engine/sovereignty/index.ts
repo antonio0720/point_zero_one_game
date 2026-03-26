@@ -1,7 +1,7 @@
 /*
  * POINT ZERO ONE — BACKEND SOVEREIGNTY SUBSYSTEM BARREL
  * /backend/src/game/engine/sovereignty/index.ts
- * VERSION: 2026.03.25
+ * VERSION: 2026.03.26
  *
  * Doctrine:
  * - authoritative barrel for the full sovereignty subsystem
@@ -21,8 +21,71 @@
 export { SovereigntyEngine } from './SovereigntyEngine';
 
 // ── Proof Generator ──────────────────────────────────────────────────────────
-export { ProofGenerator } from './ProofGenerator';
-export type { BackendProofHashInput } from './ProofGenerator';
+export {
+  ProofGenerator,
+  ProofGeneratorRunContext,
+  // Constants
+  PROOF_GENERATOR_VERSION,
+  PROOF_ML_FEATURE_COUNT,
+  PROOF_DL_FEATURE_COUNT,
+  PROOF_ML_FEATURE_LABELS,
+  PROOF_DL_FEATURE_LABELS,
+  PROOF_GRADE_BRACKETS,
+  // Validation
+  validateProofInput,
+  validateProofSnapshot,
+  // CORD scoring
+  computeCordScore,
+  computeCordComponents,
+  deriveGradeFromScore,
+  computePressureSurvivalScore,
+  computeShieldDefenseScore,
+  // ML / DL
+  computeProofMLVector,
+  computeProofDLTensor,
+  // UX narratives
+  generateProofNarrative,
+  generateProofGradeNarrative,
+  generateProofIntegrityNarrative,
+  generateProofCordNarrative,
+  generateProofCompletionMessage,
+  // Artifact / certificate
+  buildProofCertificate,
+  // Batch processing
+  batchGenerateProofs,
+  computeBatchAggregateMLVector,
+  rankBatchResultsByGrade,
+  filterBatchResultsByOutcome,
+  computeBatchCordStats,
+  // Serialization
+  serializeProofResult,
+  deserializeProofResult,
+  serializeProofCertificate,
+  deserializeProofCertificate,
+  // Audit trail
+  buildProofAuditEntry,
+  verifyProofAuditEntry,
+  computeAuditLogIntegrityHash,
+  verifyAuditLogIntegrity,
+  // Self-test
+  runProofGeneratorSelfTest,
+} from './ProofGenerator';
+export type {
+  BackendProofHashInput,
+  SovereigntyGradeLocal,
+  IntegrityStatusLocal,
+  ProofGeneratorConfig,
+  ProofValidationResult,
+  ProofMLVector,
+  ProofDLTensor,
+  ProofAuditEntry,
+  ProofAuditLog,
+  ProofCertificate,
+  ProofGenerationResult,
+  ProofBatchResult,
+  ProofSerializedResult,
+  ProofSelfTestResult,
+} from './ProofGenerator';
 
 // ── Replay Integrity Checker ─────────────────────────────────────────────────
 export { ReplayIntegrityChecker } from './ReplayIntegrityChecker';

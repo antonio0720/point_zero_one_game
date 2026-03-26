@@ -821,6 +821,35 @@ import {
   type ShieldRepairQueueAdapterExposureProfile,
 } from './ShieldRepairQueueSignalAdapter';
 
+import {
+  ProofGeneratorSignalAdapter,
+  createProofGeneratorSignalAdapter,
+  buildProofSignalPayload,
+  adaptAllProofSignals,
+  adaptCertificateBundle,
+  adaptAuditBatch,
+  gradeHeadline,
+  gradeCoachingMessage,
+  outcomeHeadline,
+  outcomeCoachingMessage,
+  integrityHeadline,
+  integrityCoachingMessage,
+  cordScoreMessage,
+  PROOF_SIGNAL_ADAPTER_MANIFEST,
+  type ProofGenerationResultCompat,
+  type ProofMLVectorCompat,
+  type ProofDLTensorCompat,
+  type ProofAuditEntryCompat,
+  type ProofCertificateCompat,
+  type ProofSignalAdapterContext,
+  type ProofSignalAdapterLogger,
+  type ProofSignalAdapterClock,
+  type ProofSignalAdapterSeverity,
+  type ProofSignalAdapterEventName,
+  type ProofGeneratorSignalAdapterOptions,
+  type ProofSignalAdapterStats,
+} from './ProofGeneratorSignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -1126,6 +1155,21 @@ export {
   SHIELD_REPAIR_QUEUE_ADAPTER_READY,
   SHIELD_REPAIR_QUEUE_ADAPTER_EVENT_NAMES,
   SHIELD_REPAIR_QUEUE_ADAPTER_MANIFEST,
+  // ProofGenerator signal adapter — ProofGenerator → sovereignty proof chat lane
+  ProofGeneratorSignalAdapter,
+  createProofGeneratorSignalAdapter,
+  buildProofSignalPayload,
+  adaptAllProofSignals,
+  adaptCertificateBundle,
+  adaptAuditBatch,
+  gradeHeadline,
+  gradeCoachingMessage,
+  outcomeHeadline,
+  outcomeCoachingMessage,
+  integrityHeadline,
+  integrityCoachingMessage,
+  cordScoreMessage,
+  PROOF_SIGNAL_ADAPTER_MANIFEST,
 };
 
 export type {
@@ -1523,6 +1567,19 @@ export type {
   ShieldRepairQueueAdapterRejection,
   ShieldRepairQueueAdapterHistoryEntry,
   ShieldRepairQueueAdapterExposureProfile,
+  // ProofGenerator signal adapter types
+  ProofGenerationResultCompat,
+  ProofMLVectorCompat,
+  ProofDLTensorCompat,
+  ProofAuditEntryCompat,
+  ProofCertificateCompat,
+  ProofSignalAdapterContext,
+  ProofSignalAdapterLogger,
+  ProofSignalAdapterClock,
+  ProofSignalAdapterSeverity,
+  ProofSignalAdapterEventName,
+  ProofGeneratorSignalAdapterOptions,
+  ProofSignalAdapterStats,
 };
 
 // ============================================================================
