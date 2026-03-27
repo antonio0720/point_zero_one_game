@@ -593,7 +593,7 @@ interface ZeroEngineInternalState {
 /** Options for constructing a ZeroEngine. */
 export interface ZeroEngineOptions {
   readonly clock?: SystemClock;
-  readonly bus?: EventBus<EngineEventMap & Record<string, unknown>>;
+  readonly bus?: EventBus<EngineEventMap>;
   readonly registry?: EngineRegistry;
   readonly modeDirector?: ModeRuntimeDirector;
   readonly cardRegistry?: CardRegistry;
@@ -619,7 +619,7 @@ export interface ZeroEngineOptions {
 export class ZeroEngine {
   // ─── Core infrastructure ───────────────────────────────────────────────────
   private readonly clock: SystemClock;
-  private readonly bus: EventBus<EngineEventMap & Record<string, unknown>>;
+  private readonly bus: EventBus<EngineEventMap>;
   private readonly registry: EngineRegistry;
   private readonly modeDirector: ModeRuntimeDirector;
   private readonly cardRegistry: CardRegistry;
@@ -669,7 +669,7 @@ export class ZeroEngine {
 
   public constructor(options: ZeroEngineOptions = {}) {
     this.clock = options.clock ?? new SystemClock();
-    this.bus = (options.bus ?? new EventBus<EngineEventMap & Record<string, unknown>>()) as EventBus<EngineEventMap & Record<string, unknown>>;
+    this.bus = (options.bus ?? new EventBus<EngineEventMap>()) as EventBus<EngineEventMap>;
     this.registry = options.registry ?? new EngineRegistry();
     this.modeDirector = options.modeDirector ?? new ModeRuntimeDirector();
     this.cardRegistry = options.cardRegistry ?? new CardRegistry();
@@ -2543,7 +2543,7 @@ export class ZeroEngine {
   /**
    * Get access to the underlying event bus.
    */
-  public getEventBus(): EventBus<EngineEventMap & Record<string, unknown>> {
+  public getEventBus(): EventBus<EngineEventMap> {
     return this.bus;
   }
 
@@ -4017,7 +4017,7 @@ export function buildZeroEngineStack(options?: ZeroEngineOptions): {
   readonly orchestrator: EngineOrchestrator;
   readonly coordinator: RunLifecycleCoordinator;
   readonly queryService: RunQueryService;
-  readonly bus: EventBus<EngineEventMap & Record<string, unknown>>;
+  readonly bus: EventBus<EngineEventMap>;
   readonly registry: EngineRegistry;
 } {
   const engine = new ZeroEngine(options);
