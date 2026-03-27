@@ -252,11 +252,26 @@ export * as Time from './time';
  *
  * Covers: ZeroEngine (the conductor that orchestrates all 7 sovereign engines
  * through the 13-step tick sequence), EngineOrchestrator (live tick runner),
- * TickPlan (step planning and validation), DependencyBinder (reader wiring),
+ * TickPlan (step planning and validation), DependencyBinder (reader wiring
+ * with 32-dim ML vector, 6×8 DL tensor, health monitoring, timeline tracking,
+ * telemetry extraction, and chat signal construction — all available at Zero.*),
  * TickExecutor (13-step execution), TickStateLock (mutation guards),
- * OutcomeGate (terminal outcome resolution), EventFlushCoordinator (deferred
+ * OutcomeGate (terminal outcome resolution), EventFlushCoordinator (tick-boundary
+ * flush with 32-dim ML vector, 40×8 DL tensor, FlushChatSignal→LIVEOPS routing,
+ * MerkleChain seal chaining, fault detection, narrative generation, trend and
+ * recovery forecasting — consumed by EventFlushSignalAdapter in chat adapter suite;
+ * entry points: createEventFlushCoordinatorWithAnalytics, DEFAULT_EVENT_FLUSH_COORDINATOR,
+ * extractEventFlushMLVector, buildEventFlushDLTensor, verifyFlushResultSeal),
  * event dispatch), OrchestratorConfig (profile-based configuration),
- * OrchestratorDiagnostics (step-level diagnostics), OrchestratorHealthReport
+ * OrchestratorDiagnostics (runtime observer with 32-dim ML vector, 13×8 DL tensor,
+ * DiagnosticsChatSignal, trend analysis, session analytics, recovery forecast,
+ * narrative generation, step drill-down, error analysis, and run summary — all
+ * available at Zero.*; key entry points: createOrchestratorDiagnosticsWithAnalytics,
+ * extractDiagnosticsMLVector, buildDiagnosticsDLTensor, buildDiagnosticsChatSignal,
+ * computeDiagnosticsRecoveryForecast, generateDiagnosticsNarrative,
+ * ZERO_DIAGNOSTICS_TREND_ANALYZER, ZERO_DIAGNOSTICS_SESSION_ANALYTICS,
+ * ZERO_DEFAULT_DIAGNOSTICS_ML_VECTOR, ZERO_DEFAULT_DIAGNOSTICS_DL_TENSOR,
+ * ZERO_DEFAULT_DIAGNOSTICS_CHAT_SIGNAL), OrchestratorHealthReport
  * (health aggregation), OrchestratorTelemetry (telemetry collection),
  * RuntimeCheckpointCoordinator (snapshot checkpoints), RunCommandGateway
  * (command surface), RunQueryService (query surface), StepTracePublisher
@@ -269,6 +284,56 @@ export * as Time from './time';
  * chat signal emission, snapshot projections, trend analysis, recovery
  * forecasting, narrative generation, quarantine management, and full
  * lifecycle history tracking.
+ *
+ * ErrorBoundary entry points (all under Zero.*):\n *   const boundary = Zero.createErrorBoundaryWithAnalytics('system');\n *   const result = boundary.boundary.capture(meta, execute, fallback);\n *   const mlVec  = boundary.extractMLVector(tick);\n *   const tensor = boundary.buildDLTensor(tick);\n *   const signal = boundary.buildChatSignal();\n *   const trend  = boundary.getTrend();\n *   const fore   = boundary.getRecoveryForecast();\n *   const sess   = boundary.getSessionReport();\n *   // Singletons: Zero.ENGINE_ZERO_BOUNDARY, Zero.MODE_BOUNDARY,\n *   //             Zero.DETERMINISM_BOUNDARY, Zero.RESOURCE_BOUNDARY\n *\n * DependencyBinder ML/DL entry points (all under Zero.*):
+ *   const vec = Zero.extractDependencyBindingMLVector(session);   // 32-dim
+ *   const tsr = Zero.extractDependencyBindingDLTensor(session);   // 6×8
+ *   const sig = Zero.buildDependencyBindingChatSignal(session);
+ *   const tel = Zero.extractDependencyBindingTelemetry(session);
+ *   const { binder, monitor, timeline } =
+ *     Zero.createDependencyBinderWithMonitor();
+ *
+ * EventFlushCoordinator entry points (all under Zero.*):
+ *   const { coordinator, sessionId } =
+ *     Zero.createEventFlushCoordinatorWithAnalytics('solo');
+ *   const result = coordinator.flush(snapshot, bus);
+ *   const mlVec  = coordinator.extractMLVector();   // 32-dim
+ *   const tensor = coordinator.buildDLTensor();     // 40×8
+ *   const signal = coordinator.buildChatSignal();   // FlushChatSignal
+ *   const trend  = coordinator.getTrend();          // FlushTrendSnapshot
+ *   const fore   = coordinator.getRecoveryForecast();
+ *   const report = coordinator.getSessionReport();
+ *   const merkle = coordinator.getMerkleRoot();
+ *   // Singleton: Zero.DEFAULT_EVENT_FLUSH_COORDINATOR
+ *   // Utility:   Zero.verifyFlushResultSeal(result)
+ *   // Utility:   Zero.formatFlushSummary(result)
+ *
+ * OrchestratorDiagnostics entry points (all under Zero.*):
+ *   const bundle = Zero.createOrchestratorDiagnosticsWithAnalytics(deps);
+ *   bundle.diagnostics.recordTickSummary(summary);    // called by TickExecutor
+ *   bundle.diagnostics.recordError(error);            // called by TickExecutor
+ *   const snap   = bundle.captureAndRecord();         // snapshot + trend + session
+ *   const result = bundle.captureAndInspect();        // full inspection bundle
+ *   const mlVec  = bundle.extractMLVector();          // 32-dim
+ *   const tensor = bundle.buildDLTensor();            // 13×8
+ *   const signal = bundle.buildChatSignal();          // DiagnosticsChatSignal
+ *   const trend  = bundle.getTrend();                 // DiagnosticsTrendSnapshot
+ *   const report = bundle.getSessionReport();         // DiagnosticsSessionReport
+ *   // Singletons: Zero.ZERO_DIAGNOSTICS_TREND_ANALYZER
+ *   //             Zero.ZERO_DIAGNOSTICS_SESSION_ANALYTICS
+ *   //             Zero.ZERO_DEFAULT_DIAGNOSTICS_ML_VECTOR
+ *   //             Zero.ZERO_DEFAULT_DIAGNOSTICS_DL_TENSOR
+ *   //             Zero.ZERO_DEFAULT_DIAGNOSTICS_CHAT_SIGNAL
+ *   // Utilities:  Zero.extractDiagnosticsMLVector(snap)
+ *   //             Zero.buildDiagnosticsDLTensor(snap)
+ *   //             Zero.buildDiagnosticsChatSignal(snap)
+ *   //             Zero.computeDiagnosticsRecoveryForecast(snap)
+ *   //             Zero.generateDiagnosticsNarrative(snap)
+ *   //             Zero.inspectDiagnosticsSnapshot(snap)
+ *   //             Zero.drillDownStep(snap, step)
+ *   //             Zero.drillDownAllSteps(snap)
+ *   //             Zero.analyzeErrors(snap)
+ *   //             Zero.buildDiagnosticsRunSummary(snap)
  *
  * Usage:
  *   import { Zero } from '../../engine';

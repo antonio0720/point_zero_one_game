@@ -4135,6 +4135,134 @@ export {
 } from './ZeroEngineSignalAdapter';
 
 // ============================================================================
+// MARK: ZeroBindingSignalAdapter — dependency-binder wiring → SYSTEM lane
+// ============================================================================
+
+export {
+  ZeroBindingSignalAdapter,
+  translateZeroBindingSignal,
+  translateZeroBindingHealthReport,
+  translateZeroBindingTelemetry,
+  createZeroBindingSignalAdapter,
+  getBindingMLFeatureLabel,
+  getBindingMLFeatureIndex,
+  isBindingMLFeatureAnomalous,
+  extractBindingGroupHealthMap,
+  isAllBindingGroupsHealthy,
+  isZeroBindingChatSignal,
+  isZeroBindingHealthReport,
+  isZeroBindingTelemetrySnapshot,
+  ZERO_BINDING_SIGNAL_ADAPTER_VERSION,
+  ZERO_BINDING_SIGNAL_KINDS,
+  ZERO_BINDING_SIGNAL_SEVERITIES,
+  ZERO_BINDING_ADAPTER_DEFAULT_CONFIG,
+  ZERO_DEFAULT_BINDING_SIGNAL_ADAPTER,
+  ZERO_BINDING_ML_FEATURE_LABEL_COUNT,
+  ZERO_BINDING_ML_FEATURE_LABELS_COMPAT,
+  type ZeroBindingSignalKind,
+  type ZeroBindingGroupCompat,
+  type ZeroBindingModeCode,
+  type ZeroBindingMLVectorCompat,
+  type ZeroBindingChatSignalCompat,
+  type ZeroBindingHealthReportCompat,
+  type ZeroBindingTelemetrySnapshotCompat,
+  type ZeroBindingAdapterConfig,
+  type ZeroBindingAdapterResult,
+  type ZeroBindingSignalOutput,
+  type ZeroBindingSignalSeverity,
+} from './ZeroBindingSignalAdapter';
+
+// ============================================================================
+// MARK: ErrorBoundarySignalAdapter — Engine 0 step faults → SYSTEM lane
+// ============================================================================
+
+export {
+  ErrorBoundarySignalAdapter,
+  createErrorBoundarySignalAdapter,
+  translateErrorBoundarySignal,
+  translateErrorBoundaryMLVector,
+  translateErrorBoundaryTelemetry,
+  isErrorBoundaryChatSignalCompat,
+  isErrorBoundaryMLVectorCompat,
+  getErrorBoundaryAdapterMLFeatureLabel,
+  getErrorBoundaryAdapterMLFeatureIndex,
+  isErrorBoundaryAdapterMLFeatureAnomalous,
+  ERROR_BOUNDARY_SIGNAL_ADAPTER_VERSION,
+  ERROR_BOUNDARY_SIGNAL_ADAPTER_DEFAULT_CONFIG,
+  ERROR_BOUNDARY_DEFAULT_ADAPTER,
+  ERROR_BOUNDARY_ADAPTER_SIGNAL_KINDS,
+  ERROR_BOUNDARY_ML_FEATURE_LABEL_COUNT,
+  ERROR_BOUNDARY_ML_FEATURE_LABELS_COMPAT,
+  ERROR_BOUNDARY_ADAPTER_MODULE_READY,
+  clampErrorBoundaryScore01,
+  clampErrorBoundaryScore100,
+  type ErrorBoundaryOwnerCompat,
+  type ErrorCategoryCompat,
+  type ErrorBoundarySignalKindCompat,
+  type ErrorBoundaryTrendDirectionCompat,
+  type ErrorBoundaryRecoveryRecommendationCompat,
+  type ErrorBoundaryChatSignalCompat,
+  type ErrorBoundaryMLVectorCompat,
+  type ErrorBoundaryDLTensorCompat,
+  type ErrorBoundaryTelemetrySnapshotCompat,
+  type ErrorBoundaryTrendSnapshotCompat,
+  type ErrorBoundaryRecoveryForecastCompat,
+  type ErrorBoundarySessionReportCompat,
+  type ErrorBoundarySignalAdapterConfig,
+  type ErrorBoundaryAdapterSignalKind,
+  type ErrorBoundaryAdapterSeverity,
+  type ErrorBoundarySignalOutput,
+  type ErrorBoundaryAdapterResult,
+  type ErrorBoundaryAdapterState,
+  type ErrorBoundaryAdapterReport,
+} from './ErrorBoundarySignalAdapter';
+
+// ============================================================================
+// MARK: EventFlushSignalAdapter — Engine 0 flush coordinator → LIVEOPS lane
+// ============================================================================
+
+export {
+  EventFlushSignalAdapter,
+  EVENT_FLUSH_DEFAULT_ADAPTER,
+  EVENT_FLUSH_STRICT_ADAPTER,
+  EVENT_FLUSH_VERBOSE_ADAPTER,
+  type ModeCodeCompat,
+  type PressureTierCompat,
+  type RunPhaseCompat,
+  type FlushSignalKindCompat,
+  type FlushChatSignalCompat,
+  type FlushMLVectorCompat,
+  type FlushDLTensorCompat,
+  type FlushTelemetrySnapshotCompat,
+  type FlushTrendDirectionCompat,
+  type FlushTrendSnapshotCompat,
+  type FlushRecoveryActionCompat,
+  type FlushRecoveryForecastCompat,
+  type FlushSessionReportCompat,
+  type EventFlushSignalAdapterConfig,
+  type EventFlushChatSignalKind,
+  type EventFlushChatPayload,
+  type EventFlushTranslationResult,
+} from './EventFlushSignalAdapter';
+
+// ============================================================================
+// MARK: OrchestratorDiagnosticsSignalAdapter — Engine 0 diagnostics → LIVEOPS
+// ============================================================================
+
+export {
+  OrchestratorDiagnosticsSignalAdapter,
+  ORCHESTRATOR_DIAGNOSTICS_DEFAULT_ADAPTER,
+  ORCHESTRATOR_DIAGNOSTICS_STRICT_ADAPTER,
+  ORCHESTRATOR_DIAGNOSTICS_VERBOSE_ADAPTER,
+  type DiagnosticsSignalCompat,
+  type DiagnosticsMLVectorSignal,
+  type DiagnosticsTrendSignal,
+  type DiagnosticsSessionSignal,
+  type DiagnosticsTelemetrySignal,
+  type OrchestratorDiagnosticsAdapterMode,
+} from './OrchestratorDiagnosticsSignalAdapter';
+
+// ============================================================================
 // MARK: Final default export
 // ============================================================================
 
