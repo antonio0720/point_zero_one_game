@@ -59,7 +59,6 @@ import {
   type ChatInputEnvelope,
   type ChatRoomId,
   type ChatSignalEnvelope,
-  type ChatVisibleChannel,
   type JsonValue,
   type Nullable,
   type UnixMs,
@@ -3141,20 +3140,20 @@ export function buildRepairQueueEnqueueSignal(
 ): ChatInputEnvelope {
   const result = buildEnqueueAccepted(job);
   const signal: ChatSignalEnvelope = {
-    type: 'signal',
-    eventName: 'shield_repair_queue.job_created',
-    channel: channel as ChatVisibleChannel,
-    payload: {
+    type: 'BATTLE',
+    roomId: roomId ?? null,
+    emittedAt: asUnixMs(Date.now()),
+    metadata: {
+      eventName: 'shield_repair_queue.job_created',
+      channel: channel as unknown as string,
       jobId: result.accepted ? result.job.jobId : '',
-      layerId: job.layerId,
+      layerId: job.layerId as unknown as string,
       amount: job.amount,
       durationTicks: job.durationTicks,
       tick,
-    } as unknown as JsonValue,
-    roomId: roomId ?? null,
-    emittedAt: asUnixMs(Date.now()),
+    } as Readonly<Record<string, JsonValue>>,
   };
-  return { type: 'chat_signal', signal } as ChatInputEnvelope;
+  return { kind: 'BATTLE_SIGNAL', emittedAt: signal.emittedAt, payload: signal };
 }
 
 /** Build a ChatInputEnvelope for a queue rejection event. */
@@ -3164,19 +3163,19 @@ export function buildRepairQueueRejectionSignal(
   roomId?: ChatRoomId | null,
 ): ChatInputEnvelope {
   const signal: ChatSignalEnvelope = {
-    type: 'signal',
-    eventName: 'shield_repair_queue.job_rejected',
-    channel: 'REPAIR_HIGH' as ChatVisibleChannel,
-    payload: {
-      layerId: rejection.layerId,
+    type: 'BATTLE',
+    roomId: roomId ?? null,
+    emittedAt: asUnixMs(Date.now()),
+    metadata: {
+      eventName: 'shield_repair_queue.job_rejected',
+      channel: 'REPAIR_HIGH',
+      layerId: rejection.layerId as unknown as string,
       amount: rejection.amount,
       tick,
       reason: 'queue_capacity_exceeded',
-    } as unknown as JsonValue,
-    roomId: roomId ?? null,
-    emittedAt: asUnixMs(Date.now()),
+    } as Readonly<Record<string, JsonValue>>,
   };
-  return { type: 'chat_signal', signal } as ChatInputEnvelope;
+  return { kind: 'BATTLE_SIGNAL', emittedAt: signal.emittedAt, payload: signal };
 }
 
 /** Build a ChatInputEnvelope for a session summary signal. */
@@ -3185,21 +3184,21 @@ export function buildRepairQueueSessionSummarySignal(
   roomId?: ChatRoomId | null,
 ): ChatInputEnvelope {
   const signal: ChatSignalEnvelope = {
-    type: 'signal',
-    eventName: 'shield_repair_queue.session_summary',
-    channel: 'REPAIR_LOW' as ChatVisibleChannel,
-    payload: {
+    type: 'BATTLE',
+    roomId: roomId ?? null,
+    emittedAt: asUnixMs(Date.now()),
+    metadata: {
+      eventName: 'shield_repair_queue.session_summary',
+      channel: 'REPAIR_LOW',
       runId: report.runId,
       finalTick: report.finalTick,
       totalJobsObserved: report.state.totalJobsObserved,
       totalCompletionsObserved: report.state.totalCompletionsObserved,
       totalRejectionsObserved: report.state.totalRejectionsObserved,
       signalCount: report.state.signalCount,
-    } as unknown as JsonValue,
-    roomId: roomId ?? null,
-    emittedAt: asUnixMs(Date.now()),
+    } as Readonly<Record<string, JsonValue>>,
   };
-  return { type: 'chat_signal', signal } as ChatInputEnvelope;
+  return { kind: 'BATTLE_SIGNAL', emittedAt: signal.emittedAt, payload: signal };
 }
 
 // ── Short-prefix helper aliases (classifyRepairAdapterSeverity, etc.) ─────────
