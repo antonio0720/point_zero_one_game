@@ -3360,3 +3360,1079 @@ export function computeSeasonPulse(
   const analyzer = new SeasonPulseAnalyzer();
   return analyzer.analyze(clock, tier, mode, nowMs);
 }
+
+// ============================================================================
+// SECTION 20 — SeasonBudgetSimulator
+// ============================================================================
+
+/**
+ * Projected budget consumption under a given season window configuration.
+ * Simulates N ticks forward and returns expected time exhaustion.
+ */
+export interface SeasonBudgetProjection {
+  readonly simulatedTicks: number;
+  readonly totalBudgetMs: number;
+  readonly projectedConsumedMs: number;
+  readonly projectedRemainingMs: number;
+  readonly projectedExhaustionTick: number | null;
+  readonly averageTickDurationMs: number;
+  readonly seasonMultiplierImpact: number;
+  readonly modeTempoImpact: number;
+  readonly budgetUtilizationPct: Score01;
+  readonly budgetRiskClass: 'EXHAUST' | 'CRITICAL' | 'WARNING' | 'SAFE';
+  readonly tickBreakdown: readonly SeasonBudgetTickRecord[];
+}
+
+/** Per-simulated-tick budget record. */
+export interface SeasonBudgetTickRecord {
+  readonly tick: number;
+  readonly durationMs: number;
+  readonly cumulativeMs: number;
+  readonly remainingMs: number;
+  readonly tierAtTick: PressureTier;
+  readonly seasonMultiplier: number;
+}
+
+/**
+ * SeasonBudgetSimulator — projects forward from the current season state
+ * to estimate how budget is consumed under various season window configurations.
+ *
+ * Uses season pressure multiplier + mode tempo + tier duration to model
+ * effective tick duration across N simulated ticks.
+ */
+export class SeasonBudgetSimulator {
+  /** Maximum ticks to simulate in a single projection. */
+  private static readonly MAX_SIMULATE_TICKS = 200;
+
+  /**
+   * Simulate budget consumption over the next `tickCount` ticks.
+   *
+   * Season pressure is factored into the effective tick duration by scaling
+   * the base tier duration down proportionally to the pressure multiplier.
+   * Higher season pressure → shorter effective ticks → faster budget burn.
+   */
+  public simulate(
+    clock: SeasonClock,
+    tier: PressureTier,
+    mode: ModeCode,
+    totalBudgetMs: number,
+    consumedMs: number,
+    tickCount: number,
+    nowMs?: number,
+  ): SeasonBudgetProjection {
+    const refMs = nowMs ?? Date.now();
+    const clampedTicks = Math.min(tickCount, SeasonBudgetSimulator.MAX_SIMULATE_TICKS);
+
+    const context = clock.getPressureContext(refMs);
+    const seasonMultiplier = context.pressureMultiplier;
+    const modeTempo = TIME_CONTRACT_MODE_TEMPO[mode];
+    const baseDurationMs = TIER_DURATIONS_MS[tier];
+
+    // Effective tick duration compressed by season pressure and mode tempo
+    const effectiveDurationMs = Math.max(
+      500,
+      Math.round((baseDurationMs / modeTempo) / Math.max(1, seasonMultiplier * 0.5)),
+    );
+
+    const tickBreakdown: SeasonBudgetTickRecord[] = [];
+    let cumulative = consumedMs;
+    let exhaustionTick: number | null = null;
+    let remainingBudget = totalBudgetMs - consumedMs;
+
+    // Escalating tier sequence for simulation
+    const tierOrder: PressureTier[] = ['T0', 'T1', 'T2', 'T3', 'T4'];
+    let currentTierIndex = tierOrder.indexOf(tier);
+
+    for (let i = 1; i <= clampedTicks; i++) {
+      const simulatedTier = tierOrder[currentTierIndex] ?? 'T4';
+      const simDuration = Math.max(
+        500,
+        Math.round((TIER_DURATIONS_MS[simulatedTier] / modeTempo) / Math.max(1, seasonMultiplier * 0.5)),
+      );
+
+      cumulative += simDuration;
+      remainingBudget -= simDuration;
+
+      tickBreakdown.push({
+        tick: i,
+        durationMs: simDuration,
+        cumulativeMs: cumulative,
+        remainingMs: Math.max(0, totalBudgetMs - cumulative),
+        tierAtTick: simulatedTier,
+        seasonMultiplier,
+      });
+
+      if (cumulative >= totalBudgetMs && exhaustionTick === null) {
+        exhaustionTick = i;
+      }
+
+      // Simulate mild tier escalation every 30 ticks (pressure builds over time)
+      if (i % 30 === 0 && currentTierIndex < tierOrder.length - 1) {
+        currentTierIndex++;
+      }
+    }
+
+    const projectedConsumedMs = Math.min(totalBudgetMs, cumulative);
+    const projectedRemainingMs = Math.max(0, totalBudgetMs - projectedConsumedMs);
+    const utilizationPct = clamp01(projectedConsumedMs / Math.max(1, totalBudgetMs));
+    const budgetRiskClass = this.classifyBudgetRisk(utilizationPct as unknown as number);
+
+    return Object.freeze({
+      simulatedTicks: clampedTicks,
+      totalBudgetMs,
+      projectedConsumedMs,
+      projectedRemainingMs,
+      projectedExhaustionTick: exhaustionTick,
+      averageTickDurationMs: effectiveDurationMs,
+      seasonMultiplierImpact: Number((seasonMultiplier - 1.0).toFixed(4)),
+      modeTempoImpact: Number((modeTempo - 1.0).toFixed(4)),
+      budgetUtilizationPct: utilizationPct,
+      budgetRiskClass,
+      tickBreakdown: Object.freeze(tickBreakdown),
+    });
+  }
+
+  /**
+   * Compare budget projections across all four modes.
+   * Useful for mode-selection advisory: which mode conserves budget most effectively.
+   */
+  public compareAcrossModes(
+    clock: SeasonClock,
+    tier: PressureTier,
+    totalBudgetMs: number,
+    consumedMs: number,
+    tickCount: number,
+    nowMs?: number,
+  ): Readonly<Record<ModeCode, SeasonBudgetProjection>> {
+    const modes: ModeCode[] = ['solo', 'pvp', 'coop', 'ghost'];
+    const result: Record<ModeCode, SeasonBudgetProjection> = {} as Record<ModeCode, SeasonBudgetProjection>;
+
+    for (const mode of modes) {
+      result[mode] = this.simulate(clock, tier, mode, totalBudgetMs, consumedMs, tickCount, nowMs);
+    }
+
+    return Object.freeze(result);
+  }
+
+  /**
+   * Estimate how many ticks the budget can sustain at current consumption rate.
+   */
+  public estimateRemainingTicks(
+    remainingBudgetMs: number,
+    tier: PressureTier,
+    mode: ModeCode,
+    seasonMultiplier: number,
+  ): number {
+    const modeTempo = TIME_CONTRACT_MODE_TEMPO[mode];
+    const baseDurationMs = TIER_DURATIONS_MS[tier];
+    const effectiveDuration = Math.max(
+      500,
+      Math.round((baseDurationMs / modeTempo) / Math.max(1, seasonMultiplier * 0.5)),
+    );
+    return Math.floor(remainingBudgetMs / effectiveDuration);
+  }
+
+  private classifyBudgetRisk(
+    utilizationPct: number,
+  ): 'EXHAUST' | 'CRITICAL' | 'WARNING' | 'SAFE' {
+    if (utilizationPct >= TIME_CONTRACT_BUDGET_THRESHOLDS.EXHAUST_PCT) return 'EXHAUST';
+    if (utilizationPct >= TIME_CONTRACT_BUDGET_THRESHOLDS.CRITICAL_PCT) return 'CRITICAL';
+    if (utilizationPct >= TIME_CONTRACT_BUDGET_THRESHOLDS.WARNING_PCT) return 'WARNING';
+    return 'SAFE';
+  }
+}
+
+// ============================================================================
+// SECTION 21 — SeasonDecisionBatchAnalyzer
+// ============================================================================
+
+/** A single decision window in the context of season pressure. */
+export interface SeasonDecisionWindowRecord {
+  readonly windowId: string;
+  readonly cardId: string;
+  readonly baseDurationMs: number;
+  readonly seasonAdjustedDurationMs: number;
+  readonly pressureMultiplier: number;
+  readonly urgencyScore: Score01;
+  readonly isRaidActive: boolean;
+  readonly isHelperBlackedOut: boolean;
+  readonly recommendedAction: 'RESOLVE_FAST' | 'HOLD' | 'LET_EXPIRE' | 'STANDARD';
+  readonly reasoning: string;
+}
+
+/** Batch analysis of decision windows under current season state. */
+export interface SeasonDecisionBatchAnalysis {
+  readonly analyzedCount: number;
+  readonly seasonMultiplier: number;
+  readonly lifecycle: SeasonLifecycleState;
+  readonly raidActive: boolean;
+  readonly helperBlackedOut: boolean;
+  readonly urgencyAvg: Score01;
+  readonly urgencyPeak: Score01;
+  readonly records: readonly SeasonDecisionWindowRecord[];
+  readonly batchRecommendation: 'URGENT_RESOLVE' | 'STANDARD' | 'HOLD_POSSIBLE';
+}
+
+/**
+ * SeasonDecisionBatchAnalyzer — analyzes a batch of pending decision windows
+ * in the context of the current season state.
+ *
+ * Season windows can suppress helper blackout, trigger hater raids, and amplify
+ * the urgency of open decision windows. This analyzer surfaces that context.
+ */
+export class SeasonDecisionBatchAnalyzer {
+  /**
+   * Analyze a batch of decision windows against the current season state.
+   */
+  public analyze(
+    clock: SeasonClock,
+    tier: PressureTier,
+    decisionWindows: Array<{ windowId: string; cardId: string; baseDurationMs: number }>,
+    nowMs?: number,
+  ): SeasonDecisionBatchAnalysis {
+    const refMs = nowMs ?? Date.now();
+    const context = clock.getPressureContext(refMs);
+    const activeWindows = context.activeWindows;
+
+    // Determine season-level flags
+    const raidActive = activeWindows.some((w) => SEASON_WINDOW_HATER_RAID[w.type]);
+    const helperBlackedOut = activeWindows.some((w) => SEASON_WINDOW_HELPER_BLACKOUT[w.type]);
+
+    // Base tier urgency
+    const tierUrgency = TIME_CONTRACT_TIER_URGENCY[tier];
+    const seasonMultiplier = context.pressureMultiplier;
+
+    const records: SeasonDecisionWindowRecord[] = [];
+
+    for (const dw of decisionWindows) {
+      // Season pressure compresses decision window duration
+      const adjustedDuration = Math.max(
+        500,
+        Math.round(dw.baseDurationMs / Math.max(1, seasonMultiplier * 0.4)),
+      );
+
+      // Urgency = tier urgency × seasonal heat
+      const seasonHeat = computeWindowHeatAggregate(refMs, activeWindows);
+      const rawUrgency = tierUrgency * 0.6 + (seasonHeat as unknown as number) * 0.4;
+      const urgencyScore = clamp01(rawUrgency + (raidActive ? 0.15 : 0));
+
+      // Recommendation logic
+      let recommendedAction: SeasonDecisionWindowRecord['recommendedAction'];
+      let reasoning: string;
+
+      if (raidActive && (urgencyScore as unknown as number) >= 0.7) {
+        recommendedAction = 'RESOLVE_FAST';
+        reasoning = 'Hater raid active — resolve immediately to avoid forced worst option';
+      } else if (helperBlackedOut && (urgencyScore as unknown as number) >= 0.5) {
+        recommendedAction = 'RESOLVE_FAST';
+        reasoning = 'Helper blackout — no assistance available, act decisively';
+      } else if ((urgencyScore as unknown as number) < 0.3 && !raidActive) {
+        recommendedAction = 'HOLD';
+        reasoning = 'Low urgency — hold charge available, consider using to buy time';
+      } else {
+        recommendedAction = 'STANDARD';
+        reasoning = `Standard resolution — urgency ${(urgencyScore as unknown as number).toFixed(2)} at tier ${tier}`;
+      }
+
+      records.push({
+        windowId: dw.windowId,
+        cardId: dw.cardId,
+        baseDurationMs: dw.baseDurationMs,
+        seasonAdjustedDurationMs: adjustedDuration,
+        pressureMultiplier: seasonMultiplier,
+        urgencyScore,
+        isRaidActive: raidActive,
+        isHelperBlackedOut: helperBlackedOut,
+        recommendedAction,
+        reasoning,
+      });
+    }
+
+    // Batch-level stats
+    const urgencies = records.map((r) => r.urgencyScore as unknown as number);
+    const urgencyAvg = clamp01(
+      urgencies.length > 0 ? urgencies.reduce((a, b) => a + b, 0) / urgencies.length : 0,
+    );
+    const urgencyPeak = clamp01(urgencies.length > 0 ? Math.max(...urgencies) : 0);
+
+    const urgentCount = records.filter((r) => r.recommendedAction === 'RESOLVE_FAST').length;
+    const holdCount = records.filter((r) => r.recommendedAction === 'HOLD').length;
+
+    let batchRecommendation: SeasonDecisionBatchAnalysis['batchRecommendation'];
+    if (urgentCount > 0 || raidActive) {
+      batchRecommendation = 'URGENT_RESOLVE';
+    } else if (holdCount > records.length / 2) {
+      batchRecommendation = 'HOLD_POSSIBLE';
+    } else {
+      batchRecommendation = 'STANDARD';
+    }
+
+    return Object.freeze({
+      analyzedCount: records.length,
+      seasonMultiplier,
+      lifecycle: context.lifecycle,
+      raidActive,
+      helperBlackedOut,
+      urgencyAvg,
+      urgencyPeak,
+      records: Object.freeze(records),
+      batchRecommendation,
+    });
+  }
+}
+
+// ============================================================================
+// SECTION 22 — SeasonRecoveryForecaster
+// ============================================================================
+
+/** A single step in a recovery forecast timeline. */
+export interface SeasonRecoveryStep {
+  readonly stepMs: number;
+  readonly cumulativeMs: number;
+  readonly projectedMultiplier: number;
+  readonly projectedLifecycle: SeasonLifecycleState;
+  readonly windowsExpectedActive: number;
+  readonly recoveryProgressFraction: Score01;
+  readonly noteworthy: boolean;
+  readonly note: string;
+}
+
+/** Full recovery forecast for transitioning from high-pressure state to target. */
+export interface SeasonRecoveryForecast {
+  readonly targetMultiplier: number;
+  readonly currentMultiplier: number;
+  readonly estimatedRecoveryMs: number;
+  readonly estimatedRecoveryTicks: number;
+  readonly recoverySteps: readonly SeasonRecoveryStep[];
+  readonly isInstantRecovery: boolean;
+  readonly isRecoveryPossible: boolean;
+  readonly forecastNarrative: string;
+  readonly tier: PressureTier;
+  readonly mode: ModeCode;
+}
+
+/**
+ * SeasonRecoveryForecaster — forecasts how long recovery from the current
+ * high-pressure season state would take if no new windows activate.
+ *
+ * Recovery is defined as: the time until the pressure multiplier drops
+ * back to the target level (default: 1.0).
+ *
+ * Uses window end times to project when multiplier naturally decays.
+ */
+export class SeasonRecoveryForecaster {
+  /**
+   * Forecast recovery from current pressure to `targetMultiplier`.
+   */
+  public forecast(
+    clock: SeasonClock,
+    tier: PressureTier,
+    mode: ModeCode,
+    targetMultiplier = 1.0,
+    nowMs?: number,
+  ): SeasonRecoveryForecast {
+    const refMs = nowMs ?? Date.now();
+    const context = clock.getPressureContext(refMs);
+    const currentMultiplier = context.pressureMultiplier;
+
+    if (currentMultiplier <= targetMultiplier) {
+      return this.buildInstantRecovery(currentMultiplier, targetMultiplier, tier, mode, refMs, context.lifecycle);
+    }
+
+    const activeWindows = context.activeWindows;
+    if (activeWindows.length === 0) {
+      return this.buildInstantRecovery(currentMultiplier, targetMultiplier, tier, mode, refMs, context.lifecycle);
+    }
+
+    // Find the last active window end time — that's when multiplier drops to 1.0
+    const lastWindowEndMs = Math.max(...activeWindows.map((w) => w.endsAtMs));
+    const estimatedRecoveryMs = Math.max(0, lastWindowEndMs - refMs);
+    const modeTempo = TIME_CONTRACT_MODE_TEMPO[mode];
+    const avgTickMs = TIER_DURATIONS_MS[tier] / modeTempo;
+    const estimatedRecoveryTicks = Math.ceil(estimatedRecoveryMs / Math.max(1, avgTickMs));
+
+    // Build recovery steps at 1-hour intervals
+    const steps: SeasonRecoveryStep[] = [];
+    const stepIntervalMs = 60 * 60 * 1_000; // 1 hour
+    const maxSteps = Math.min(48, Math.ceil(estimatedRecoveryMs / stepIntervalMs) + 2);
+
+    for (let i = 0; i <= maxSteps; i++) {
+      const stepTimeMs = refMs + i * stepIntervalMs;
+      const futureContext = clock.getPressureContext(stepTimeMs);
+      const futureMultiplier = futureContext.pressureMultiplier;
+      const progressFraction = currentMultiplier > targetMultiplier
+        ? clamp01(1 - (futureMultiplier - targetMultiplier) / Math.max(0.01, currentMultiplier - targetMultiplier))
+        : clamp01(1);
+
+      const isNoteworthy = futureMultiplier <= targetMultiplier && (steps[i - 1]?.projectedMultiplier ?? currentMultiplier) > targetMultiplier;
+
+      steps.push({
+        stepMs: stepTimeMs,
+        cumulativeMs: i * stepIntervalMs,
+        projectedMultiplier: futureMultiplier,
+        projectedLifecycle: futureContext.lifecycle,
+        windowsExpectedActive: futureContext.activeWindows.length,
+        recoveryProgressFraction: progressFraction,
+        noteworthy: isNoteworthy,
+        note: isNoteworthy
+          ? `Multiplier drops to ${futureMultiplier.toFixed(3)} — approaching target ${targetMultiplier}`
+          : `×${futureMultiplier.toFixed(3)} | ${futureContext.activeWindows.length} active window(s)`,
+      });
+
+      if (futureMultiplier <= targetMultiplier && i > 0) break;
+    }
+
+    const recoveryNarrative = this.buildForecastNarrative(
+      currentMultiplier, targetMultiplier, estimatedRecoveryMs, tier, mode,
+    );
+
+    return Object.freeze({
+      targetMultiplier,
+      currentMultiplier,
+      estimatedRecoveryMs,
+      estimatedRecoveryTicks,
+      recoverySteps: Object.freeze(steps),
+      isInstantRecovery: false,
+      isRecoveryPossible: true,
+      forecastNarrative: recoveryNarrative,
+      tier,
+      mode,
+    });
+  }
+
+  private buildInstantRecovery(
+    current: number,
+    target: number,
+    tier: PressureTier,
+    mode: ModeCode,
+    nowMs: number,
+    lifecycle: SeasonLifecycleState,
+  ): SeasonRecoveryForecast {
+    return Object.freeze({
+      targetMultiplier: target,
+      currentMultiplier: current,
+      estimatedRecoveryMs: 0,
+      estimatedRecoveryTicks: 0,
+      recoverySteps: Object.freeze([{
+        stepMs: nowMs,
+        cumulativeMs: 0,
+        projectedMultiplier: current,
+        projectedLifecycle: lifecycle,
+        windowsExpectedActive: 0,
+        recoveryProgressFraction: clamp01(1),
+        noteworthy: true,
+        note: 'Already at or below target multiplier.',
+      }]),
+      isInstantRecovery: true,
+      isRecoveryPossible: true,
+      forecastNarrative: `${tier}/${mode}: Multiplier ×${current.toFixed(3)} ≤ target ×${target.toFixed(3)}. No recovery needed.`,
+      tier,
+      mode,
+    });
+  }
+
+  private buildForecastNarrative(
+    current: number,
+    target: number,
+    recoveryMs: number,
+    tier: PressureTier,
+    mode: ModeCode,
+  ): string {
+    const hours = (recoveryMs / (60 * 60 * 1_000)).toFixed(1);
+    const tierLabel = PRESSURE_TIER_URGENCY_LABEL[tier];
+    const tempo = TIME_CONTRACT_MODE_TEMPO[mode];
+    return [
+      `Recovery forecast: ×${current.toFixed(3)} → ×${target.toFixed(3)}`,
+      `ETA: ~${hours}h | Tier: ${tierLabel} | Mode: ${mode.toUpperCase()} (tempo ×${tempo})`,
+      `Season pressure remains active until final window closes.`,
+    ].join(' — ');
+  }
+}
+
+// ============================================================================
+// SECTION 23 — SeasonChatBridgeAdapter
+// ============================================================================
+
+/** All season-triggered chat events in one bundle. */
+export interface SeasonChatBridgeBundle {
+  readonly primaryEnvelope: ChatInputEnvelope;
+  readonly liveops: ChatLiveOpsSnapshot;
+  readonly eventClass:
+    | 'SEASON_START'
+    | 'SEASON_END'
+    | 'WINDOW_TRANSITION'
+    | 'PRESSURE_SPIKE'
+    | 'DORMANT';
+  readonly channelHints: readonly string[];
+  readonly priorityLevel: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW';
+  readonly suppressHelper: boolean;
+  readonly raidInjectionRecommended: boolean;
+  readonly narrativeSummary: string;
+  readonly lifecycle: SeasonLifecycleState;
+  readonly seasonId: Nullable<string>;
+  readonly emittedAt: UnixMs;
+}
+
+/**
+ * SeasonChatBridgeAdapter — the authoritative season→chat bridge.
+ *
+ * Translates all season state transitions and window events into
+ * canonical ChatInputEnvelope objects ready for ingest() into the chat engine.
+ *
+ * This adapter is the ONLY code that should emit LIVEOPS_SIGNAL envelopes
+ * from the season subsystem. All other chat bridges (battle, run, multiplayer,
+ * economy) operate on their own lanes.
+ */
+export class SeasonChatBridgeAdapter {
+  private readonly emitter: SeasonChatSignalEmitter;
+  private readonly narrator: SeasonNarrator;
+
+  public constructor() {
+    this.emitter = new SeasonChatSignalEmitter();
+    this.narrator = new SeasonNarrator();
+  }
+
+  /**
+   * Build a full SeasonChatBridgeBundle from the current clock state.
+   * This is the primary output surface for the chat engine's LIVEOPS processing.
+   */
+  public buildBundle(
+    clock: SeasonClock,
+    tier: PressureTier,
+    phase: RunPhase,
+    mode: ModeCode,
+    roomId: Nullable<ChatRoomId>,
+    nowMs?: number,
+  ): SeasonChatBridgeBundle {
+    const refMs = nowMs ?? Date.now();
+    const context = clock.getPressureContext(refMs);
+    const snapshot = clock.snapshot(refMs);
+
+    const liveops = buildSeasonLiveOpsSnapshot(
+      context.activeWindows, refMs, context.pressureMultiplier,
+    );
+
+    const envelope = buildSeasonChatEnvelope(
+      liveops, refMs, roomId, snapshot.seasonId, context.lifecycle,
+    );
+
+    const eventClass = this.classifyEventClass(context);
+    const priorityLevel = this.derivePriority(context, tier, liveops);
+    const channelHints = this.buildChannelHints(context, eventClass);
+    const narrativeSummary = this.narrator.narrateState(context, tier, phase, mode);
+
+    return Object.freeze({
+      primaryEnvelope: envelope,
+      liveops,
+      eventClass,
+      channelHints: Object.freeze(channelHints),
+      priorityLevel,
+      suppressHelper: liveops.helperBlackout,
+      raidInjectionRecommended: liveops.haterRaidActive,
+      narrativeSummary,
+      lifecycle: context.lifecycle,
+      seasonId: snapshot.seasonId,
+      emittedAt: asUnixMs(refMs),
+    });
+  }
+
+  /**
+   * Build a bundle for a specific window activation event.
+   */
+  public buildWindowActivationBundle(
+    window: SeasonTimeWindow,
+    lifecycle: SeasonLifecycleState,
+    pressureMultiplier: number,
+    roomId: Nullable<ChatRoomId>,
+    nowMs?: number,
+  ): SeasonChatBridgeBundle {
+    const refMs = nowMs ?? Date.now();
+
+    const liveops: ChatLiveOpsSnapshot = {
+      worldEventName: SEASON_WINDOW_LIVEOPS_NAMES[window.type],
+      heatMultiplier01: clamp01(SEASON_WINDOW_CHAT_HEAT[window.type] ?? 0.5),
+      helperBlackout: SEASON_WINDOW_HELPER_BLACKOUT[window.type],
+      haterRaidActive: SEASON_WINDOW_HATER_RAID[window.type],
+    };
+
+    const envelope = buildSeasonChatEnvelope(liveops, refMs, roomId, null, lifecycle);
+    const windowNarrative = this.narrator.narrateWindowActivation(window, lifecycle, pressureMultiplier);
+
+    return Object.freeze({
+      primaryEnvelope: envelope,
+      liveops,
+      eventClass: 'WINDOW_TRANSITION' as const,
+      channelHints: Object.freeze(this.buildWindowChannelHints(window.type)),
+      priorityLevel: this.deriveWindowPriority(window.type),
+      suppressHelper: liveops.helperBlackout,
+      raidInjectionRecommended: liveops.haterRaidActive,
+      narrativeSummary: windowNarrative,
+      lifecycle,
+      seasonId: null,
+      emittedAt: asUnixMs(refMs),
+    });
+  }
+
+  /** Reset the underlying emitter state. */
+  public reset(): void {
+    this.emitter.reset();
+  }
+
+  private classifyEventClass(
+    context: SeasonPressureContext,
+  ): SeasonChatBridgeBundle['eventClass'] {
+    if (context.lifecycle !== 'ACTIVE') return 'DORMANT';
+    if (context.msUntilStart === 0 && context.pressureMultiplier > 1.5) return 'PRESSURE_SPIKE';
+    if (context.activeWindows.some((w) => w.type === SeasonWindowType.KICKOFF)) return 'SEASON_START';
+    if (context.activeWindows.some((w) => w.type === SeasonWindowType.SEASON_FINALE)) return 'SEASON_END';
+    if (context.activeWindows.length > 0) return 'WINDOW_TRANSITION';
+    return 'DORMANT';
+  }
+
+  private derivePriority(
+    context: SeasonPressureContext,
+    tier: PressureTier,
+    liveops: ChatLiveOpsSnapshot,
+  ): SeasonChatBridgeBundle['priorityLevel'] {
+    const heatNum = liveops.heatMultiplier01 as unknown as number;
+    if (liveops.haterRaidActive || tier === 'T4') return 'CRITICAL';
+    if (heatNum >= 0.8 || tier === 'T3' || context.activeWindows.length >= 3) return 'HIGH';
+    if (heatNum >= 0.4 || context.lifecycle === 'ACTIVE') return 'NORMAL';
+    return 'LOW';
+  }
+
+  private deriveWindowPriority(
+    type: SeasonWindowType,
+  ): SeasonChatBridgeBundle['priorityLevel'] {
+    switch (type) {
+      case SeasonWindowType.SEASON_FINALE: return 'CRITICAL';
+      case SeasonWindowType.LIVEOPS_EVENT: return 'HIGH';
+      case SeasonWindowType.ARCHIVE_CLOSE: return 'HIGH';
+      case SeasonWindowType.KICKOFF: return 'NORMAL';
+      case SeasonWindowType.REENGAGE_WINDOW: return 'LOW';
+    }
+  }
+
+  private buildChannelHints(
+    context: SeasonPressureContext,
+    eventClass: SeasonChatBridgeBundle['eventClass'],
+  ): string[] {
+    const hints: string[] = ['LIVEOPS_SHADOW'];
+    if (eventClass === 'SEASON_START' || eventClass === 'SEASON_END') {
+      hints.push('GLOBAL', 'SYSTEM_SHADOW');
+    }
+    if (eventClass === 'PRESSURE_SPIKE') {
+      hints.push('NPC_SHADOW', 'SYSTEM_SHADOW');
+    }
+    if (context.activeWindows.some((w) => w.type === SeasonWindowType.LIVEOPS_EVENT)) {
+      hints.push('NPC_SHADOW');
+    }
+    return hints;
+  }
+
+  private buildWindowChannelHints(type: SeasonWindowType): string[] {
+    switch (type) {
+      case SeasonWindowType.SEASON_FINALE:
+        return ['LIVEOPS_SHADOW', 'GLOBAL', 'NPC_SHADOW', 'SYSTEM_SHADOW'];
+      case SeasonWindowType.LIVEOPS_EVENT:
+        return ['LIVEOPS_SHADOW', 'NPC_SHADOW'];
+      case SeasonWindowType.KICKOFF:
+        return ['LIVEOPS_SHADOW', 'GLOBAL'];
+      case SeasonWindowType.ARCHIVE_CLOSE:
+        return ['LIVEOPS_SHADOW'];
+      case SeasonWindowType.REENGAGE_WINDOW:
+        return ['LIVEOPS_SHADOW'];
+    }
+  }
+}
+
+// ============================================================================
+// SECTION 24 — SeasonRuntimeSummary
+// ============================================================================
+
+/**
+ * Canonical runtime summary produced by SeasonClockExtended for engine orchestrators.
+ * Safe for serialization, broadcasting, and checkpoint storage.
+ */
+export interface SeasonRuntimeSummary {
+  readonly seasonId: Nullable<string>;
+  readonly lifecycle: SeasonLifecycleState;
+  readonly lifecycleLabel: string;
+  readonly pressureMultiplier: number;
+  readonly activeWindowCount: number;
+  readonly activeWindowNames: readonly string[];
+  readonly msUntilStart: number;
+  readonly msUntilEnd: number;
+  readonly raidActive: boolean;
+  readonly helperBlackedOut: boolean;
+  readonly riskClass: SeasonRiskAssessment['riskClass'];
+  readonly riskScore: Score01;
+  readonly pulseTone: SeasonPulseSnapshot['pulseTone'];
+  readonly pulseIntensity: Score01;
+  readonly resilienceClass: SeasonResilienceScore['resilienceClass'];
+  readonly trendClass: SeasonTrendSnapshot['trendClass'];
+  readonly contractsVersion: string;
+  readonly timestampMs: number;
+}
+
+/**
+ * Build a SeasonRuntimeSummary from a SeasonClock and subsystem outputs.
+ * This is the authoritative "what is the season clock doing right now" surface
+ * for engine orchestrators (e.g., EngineOrchestrator STEP_02_TIME).
+ */
+export function buildSeasonRuntimeSummary(
+  clock: SeasonClock,
+  tier: PressureTier,
+  mode: ModeCode,
+  phase: RunPhase,
+  pressureScore: number,
+  remainingBudgetFraction: number,
+  nowMs?: number,
+): SeasonRuntimeSummary {
+  const refMs = nowMs ?? Date.now();
+  const context = clock.getPressureContext(refMs);
+  const snapshot = clock.snapshot(refMs);
+
+  // Active window names
+  const activeWindowNames = context.activeWindows.map(
+    (w) => SEASON_WINDOW_LIVEOPS_NAMES[w.type],
+  );
+
+  // Raid / helper flags from active windows
+  const raidActive = context.activeWindows.some((w) => SEASON_WINDOW_HATER_RAID[w.type]);
+  const helperBlackedOut = context.activeWindows.some((w) => SEASON_WINDOW_HELPER_BLACKOUT[w.type]);
+
+  // Risk
+  const riskProjector = new SeasonRiskProjector();
+  const risk = riskProjector.project(
+    context, tier, pressureScore, phase, mode, remainingBudgetFraction, refMs,
+  );
+
+  // Pulse
+  const pulseAnalyzer = new SeasonPulseAnalyzer();
+  const pulse = pulseAnalyzer.analyze(clock, tier, mode, refMs);
+
+  // Resilience
+  const resilienceScorer = new SeasonResilienceScorer();
+  const resilience = resilienceScorer.score(clock.getAllWindows());
+
+  // Trend (empty trend — summary doesn't hold history)
+  const trendAnalyzer = new SeasonTrendAnalyzer();
+  trendAnalyzer.push(snapshot, refMs);
+  const trend = trendAnalyzer.computeTrend();
+
+  return Object.freeze({
+    seasonId: snapshot.seasonId,
+    lifecycle: snapshot.lifecycle,
+    lifecycleLabel: TIME_CONTRACT_SEASON_LIFECYCLE_LABEL[snapshot.lifecycle],
+    pressureMultiplier: snapshot.pressureMultiplier,
+    activeWindowCount: context.activeWindows.length,
+    activeWindowNames: Object.freeze(activeWindowNames),
+    msUntilStart: snapshot.msUntilStart,
+    msUntilEnd: snapshot.msUntilEnd,
+    raidActive,
+    helperBlackedOut,
+    riskClass: risk.riskClass,
+    riskScore: risk.riskScore,
+    pulseTone: pulse.pulseTone,
+    pulseIntensity: pulse.pulseIntensity,
+    resilienceClass: resilience.resilienceClass,
+    trendClass: trend.trendClass,
+    contractsVersion: SEASON_CLOCK_VERSION.contractsVersion,
+    timestampMs: refMs,
+  });
+}
+
+// ============================================================================
+// SECTION 25 — ADDITIONAL SeasonClockExtended METHODS
+// ============================================================================
+
+// Extend SeasonClockExtended with budget simulation, recovery forecasting, chat bridge, etc.
+// These are declared as a module augmentation pattern to keep the class readable.
+
+declare module './SeasonClock' {
+  interface SeasonClockExtended {
+    /** Simulate budget consumption over N ticks under current season pressure. */
+    simulateBudget(
+      tier: PressureTier,
+      mode: ModeCode,
+      totalBudgetMs: number,
+      consumedMs: number,
+      tickCount: number,
+      nowMs?: number,
+    ): SeasonBudgetProjection;
+
+    /** Forecast recovery from current pressure multiplier to target. */
+    forecastRecovery(
+      tier: PressureTier,
+      mode: ModeCode,
+      targetMultiplier?: number,
+      nowMs?: number,
+    ): SeasonRecoveryForecast;
+
+    /** Analyze a batch of decision windows under current season pressure. */
+    analyzeDecisionBatch(
+      tier: PressureTier,
+      decisionWindows: Array<{ windowId: string; cardId: string; baseDurationMs: number }>,
+      nowMs?: number,
+    ): SeasonDecisionBatchAnalysis;
+
+    /** Build the authoritative LIVEOPS chat bridge bundle. */
+    buildChatBridgeBundle(
+      tier: PressureTier,
+      phase: RunPhase,
+      mode: ModeCode,
+      roomId: Nullable<ChatRoomId>,
+      nowMs?: number,
+    ): SeasonChatBridgeBundle;
+
+    /** Build the canonical season runtime summary for engine orchestrators. */
+    buildRuntimeSummary(
+      tier: PressureTier,
+      mode: ModeCode,
+      phase: RunPhase,
+      pressureScore: number,
+      remainingBudgetFraction: number,
+      nowMs?: number,
+    ): SeasonRuntimeSummary;
+
+    /** Compute column means of the most recent DL tensor. */
+    computeDLColumnMeans(tier: PressureTier, nowMs?: number): readonly number[];
+
+    /** Compute ML vector sparsity ratio. */
+    computeMLSparsity(
+      tier: PressureTier,
+      mode: ModeCode,
+      phase: RunPhase,
+      pressureScore: number,
+      nowMs?: number,
+    ): Score01;
+
+    /** Compute budget urgency adjusted by mode. */
+    computeBudgetUrgency(
+      remainingBudgetFraction: number,
+      mode: ModeCode,
+    ): Score01;
+  }
+}
+
+// Implementation of SeasonClockExtended extension methods via prototype extension.
+// TypeScript augmentation requires runtime prototype assignment.
+
+(SeasonClockExtended.prototype as unknown as {
+  simulateBudget: SeasonClockExtended['simulateBudget'];
+}).simulateBudget = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  mode: ModeCode,
+  totalBudgetMs: number,
+  consumedMs: number,
+  tickCount: number,
+  nowMs?: number,
+): SeasonBudgetProjection {
+  const sim = new SeasonBudgetSimulator();
+  return sim.simulate(this.clock, tier, mode, totalBudgetMs, consumedMs, tickCount, nowMs);
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  forecastRecovery: SeasonClockExtended['forecastRecovery'];
+}).forecastRecovery = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  mode: ModeCode,
+  targetMultiplier = 1.0,
+  nowMs?: number,
+): SeasonRecoveryForecast {
+  const forecaster = new SeasonRecoveryForecaster();
+  return forecaster.forecast(this.clock, tier, mode, targetMultiplier, nowMs);
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  analyzeDecisionBatch: SeasonClockExtended['analyzeDecisionBatch'];
+}).analyzeDecisionBatch = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  decisionWindows: Array<{ windowId: string; cardId: string; baseDurationMs: number }>,
+  nowMs?: number,
+): SeasonDecisionBatchAnalysis {
+  const analyzer = new SeasonDecisionBatchAnalyzer();
+  return analyzer.analyze(this.clock, tier, decisionWindows, nowMs);
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  buildChatBridgeBundle: SeasonClockExtended['buildChatBridgeBundle'];
+}).buildChatBridgeBundle = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  phase: RunPhase,
+  mode: ModeCode,
+  roomId: Nullable<ChatRoomId>,
+  nowMs?: number,
+): SeasonChatBridgeBundle {
+  const bridge = new SeasonChatBridgeAdapter();
+  return bridge.buildBundle(this.clock, tier, phase, mode, roomId, nowMs);
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  buildRuntimeSummary: SeasonClockExtended['buildRuntimeSummary'];
+}).buildRuntimeSummary = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  mode: ModeCode,
+  phase: RunPhase,
+  pressureScore: number,
+  remainingBudgetFraction: number,
+  nowMs?: number,
+): SeasonRuntimeSummary {
+  return buildSeasonRuntimeSummary(
+    this.clock, tier, mode, phase, pressureScore, remainingBudgetFraction, nowMs,
+  );
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  computeDLColumnMeans: SeasonClockExtended['computeDLColumnMeans'];
+}).computeDLColumnMeans = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  nowMs?: number,
+): readonly number[] {
+  const tensor = this.buildDLTensor(tier, nowMs);
+  const builder = new SeasonDLBuilder();
+  return builder.computeColumnMeans(tensor);
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  computeMLSparsity: SeasonClockExtended['computeMLSparsity'];
+}).computeMLSparsity = function (
+  this: SeasonClockExtended,
+  tier: PressureTier,
+  mode: ModeCode,
+  phase: RunPhase,
+  pressureScore: number,
+  nowMs?: number,
+): Score01 {
+  const refMs = nowMs ?? Date.now();
+  const vector = this.extractMLVector(tier, mode, phase, 0, 100, pressureScore, 0, 0.5, refMs);
+  const extractor = new SeasonMLExtractor();
+  return extractor.computeSparsity(vector);
+};
+
+(SeasonClockExtended.prototype as unknown as {
+  computeBudgetUrgency: SeasonClockExtended['computeBudgetUrgency'];
+}).computeBudgetUrgency = function (
+  this: SeasonClockExtended,
+  remainingBudgetFraction: number,
+  mode: ModeCode,
+): Score01 {
+  const projector = new SeasonRiskProjector();
+  return projector.computeBudgetUrgency(remainingBudgetFraction, mode);
+};
+
+// ============================================================================
+// SECTION 26 — ADDITIONAL STANDALONE EXPORTS
+// ============================================================================
+
+/**
+ * Build a SeasonBudgetProjection without a full SeasonClockExtended.
+ */
+export function simulateSeasonBudget(
+  clock: SeasonClock,
+  tier: PressureTier,
+  mode: ModeCode,
+  totalBudgetMs: number,
+  consumedMs: number,
+  tickCount: number,
+  nowMs?: number,
+): SeasonBudgetProjection {
+  return new SeasonBudgetSimulator().simulate(
+    clock, tier, mode, totalBudgetMs, consumedMs, tickCount, nowMs,
+  );
+}
+
+/**
+ * Forecast season pressure recovery without a full SeasonClockExtended.
+ */
+export function forecastSeasonRecovery(
+  clock: SeasonClock,
+  tier: PressureTier,
+  mode: ModeCode,
+  targetMultiplier = 1.0,
+  nowMs?: number,
+): SeasonRecoveryForecast {
+  return new SeasonRecoveryForecaster().forecast(clock, tier, mode, targetMultiplier, nowMs);
+}
+
+/**
+ * Build a SeasonChatBridgeBundle without a full SeasonClockExtended.
+ */
+export function buildSeasonChatBridgeBundle(
+  clock: SeasonClock,
+  tier: PressureTier,
+  phase: RunPhase,
+  mode: ModeCode,
+  roomId: Nullable<ChatRoomId>,
+  nowMs?: number,
+): SeasonChatBridgeBundle {
+  return new SeasonChatBridgeAdapter().buildBundle(clock, tier, phase, mode, roomId, nowMs);
+}
+
+/**
+ * Analyze decision windows under current season pressure.
+ */
+export function analyzeSeasonDecisionBatch(
+  clock: SeasonClock,
+  tier: PressureTier,
+  decisionWindows: Array<{ windowId: string; cardId: string; baseDurationMs: number }>,
+  nowMs?: number,
+): SeasonDecisionBatchAnalysis {
+  return new SeasonDecisionBatchAnalyzer().analyze(clock, tier, decisionWindows, nowMs);
+}
+
+/**
+ * Compare budget projections across all four modes.
+ */
+export function compareSeasonBudgetAcrossModes(
+  clock: SeasonClock,
+  tier: PressureTier,
+  totalBudgetMs: number,
+  consumedMs: number,
+  tickCount: number,
+  nowMs?: number,
+): Readonly<Record<ModeCode, SeasonBudgetProjection>> {
+  return new SeasonBudgetSimulator().compareAcrossModes(
+    clock, tier, totalBudgetMs, consumedMs, tickCount, nowMs,
+  );
+}
+
+/**
+ * Estimate remaining ticks at the current consumption rate.
+ */
+export function estimateSeasonRemainingTicks(
+  remainingBudgetMs: number,
+  tier: PressureTier,
+  mode: ModeCode,
+  clock: SeasonClock,
+  nowMs?: number,
+): number {
+  const refMs = nowMs ?? Date.now();
+  const multiplier = clock.getPressureMultiplier(refMs);
+  return new SeasonBudgetSimulator().estimateRemainingTicks(
+    remainingBudgetMs, tier, mode, multiplier,
+  );
+}
+
+/**
+ * Build a window-specific chat bridge bundle for a named window type.
+ * Use when a specific window activates mid-season and must emit its own signal.
+ */
+export function buildSeasonWindowChatBridgeBundle(
+  window: SeasonTimeWindow,
+  lifecycle: SeasonLifecycleState,
+  pressureMultiplier: number,
+  roomId: Nullable<ChatRoomId>,
+  nowMs?: number,
+): SeasonChatBridgeBundle {
+  return new SeasonChatBridgeAdapter().buildWindowActivationBundle(
+    window, lifecycle, pressureMultiplier, roomId, nowMs,
+  );
+}
