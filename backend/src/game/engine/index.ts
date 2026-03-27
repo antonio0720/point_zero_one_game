@@ -246,3 +246,37 @@ export * as Tension from './tension';
  *   const chatSignal = Time.buildTimeContractChatSignal(...);
  */
 export * as Time from './time';
+
+/**
+ * Zero subsystem — Engine 0: the foundation layer.
+ *
+ * Covers: ZeroEngine (the conductor that orchestrates all 7 sovereign engines
+ * through the 13-step tick sequence), EngineOrchestrator (live tick runner),
+ * TickPlan (step planning and validation), DependencyBinder (reader wiring),
+ * TickExecutor (13-step execution), TickStateLock (mutation guards),
+ * OutcomeGate (terminal outcome resolution), EventFlushCoordinator (deferred
+ * event dispatch), OrchestratorConfig (profile-based configuration),
+ * OrchestratorDiagnostics (step-level diagnostics), OrchestratorHealthReport
+ * (health aggregation), OrchestratorTelemetry (telemetry collection),
+ * RuntimeCheckpointCoordinator (snapshot checkpoints), RunCommandGateway
+ * (command surface), RunQueryService (query surface), StepTracePublisher
+ * (trace publication), RunBootstrapPipeline (run start), RunShutdownPipeline
+ * (run end), ErrorBoundary (error isolation), RunLifecycleCoordinator
+ * (lifecycle facade), and all zero.types orchestration contracts.
+ *
+ * ZeroEngine is the primary entry point. It wraps the orchestrator with
+ * 96-dimensional ML feature extraction, 16×128 DL tensor construction,
+ * chat signal emission, snapshot projections, trend analysis, recovery
+ * forecasting, narrative generation, quarantine management, and full
+ * lifecycle history tracking.
+ *
+ * Usage:
+ *   import { Zero } from '../../engine';
+ *   const engine = Zero.createZeroEngine();
+ *   const result = engine.startRun({ userId: 'u1', mode: 'solo' });
+ *   const mlVec = engine.extractMLVector();
+ *   const projection = engine.projectSnapshot();
+ *   const narrative = engine.generateNarrative();
+ *   const chatSignals = engine.emitChatSignals();
+ */
+export * as Zero from './zero';

@@ -25,3 +25,4 @@ export * from './TickResultBuilder';
 export * from './RunQueryService';
 export { EngineOrchestrator } from './EngineOrchestrator';
 export * from './RunLifecycleCoordinator';
+export * from './ZeroEngine';

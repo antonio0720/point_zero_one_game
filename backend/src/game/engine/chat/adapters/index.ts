@@ -4088,6 +4088,53 @@ export {
 } from './DecisionTimerSignalAdapter';
 
 // ============================================================================
+// MARK: ZeroEngineSignalAdapter — orchestration lifecycle → RUN_SIGNAL lane
+// ============================================================================
+
+export {
+  ZeroEngineSignalAdapter,
+  ZeroEngineSignalRateController,
+  ZeroEngineReplayBuffer,
+  ZeroEngineSignalAdapterSuite,
+  computeOrchestrationHealthScore,
+  computeOrchestrationThroughputScore,
+  computeOrchestrationReliabilityScore,
+  computeOrchestrationStabilityScore,
+  ZERO_ENGINE_SIGNAL_ADAPTER_VERSION,
+  ZERO_ENGINE_SIGNAL_ADAPTER_ML_THRESHOLD,
+  ZERO_ENGINE_SIGNAL_ADAPTER_DL_THRESHOLD,
+  ZERO_ENGINE_SIGNAL_ADAPTER_TICK_OVERBUDGET_MULTIPLIER,
+  ZERO_ENGINE_SIGNAL_ADAPTER_SNAPSHOT_CADENCE,
+  ZERO_ENGINE_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  ZERO_ENGINE_SIGNAL_ADAPTER_REPLAY_BUFFER_CAP,
+  ZERO_ENGINE_SIGNAL_ADAPTER_RATE_BUCKET_WINDOW_MS,
+  ZERO_ENGINE_SIGNAL_ADAPTER_RATE_BUCKET_MAX_TOKENS,
+  type ZeroEngineLifecycleTransitionCompat,
+  type ZeroEngineTickCompletionCompat,
+  type ZeroEngineOutcomeGateCompat,
+  type ZeroEngineQuarantineEntryCompat,
+  type ZeroEngineQuarantineExitCompat,
+  type ZeroEngineMLVectorCompat,
+  type ZeroEngineDLTensorCompat,
+  type ZeroEngineHealthReportCompat,
+  type ZeroEngineSnapshotProjectionCompat,
+  type ZeroEngineChatBridgeEmissionCompat,
+  type ZeroEngineSignalAdapterConfig,
+  type ZeroEngineSignalAdapterState,
+  type ZeroEngineSignalAdapterReport,
+  type ZeroEngineSignalAdapterDiagnostics,
+  type ZeroEngineSignalAdapterReadiness,
+  type ZeroEngineRateControllerConfig,
+  type ZeroEngineRateControllerState,
+  type ZeroEngineReplayBufferConfig,
+  type ZeroEngineReplayBufferQuery,
+  type ZeroEngineReplayBufferEntry,
+  type ZeroEngineSignalAdapterSuiteConfig,
+  type ZeroEngineSignalAdapterSuiteState,
+  type ZeroEngineSignalAdapterSuiteReport,
+} from './ZeroEngineSignalAdapter';
+
+// ============================================================================
 // MARK: Final default export
 // ============================================================================
 
