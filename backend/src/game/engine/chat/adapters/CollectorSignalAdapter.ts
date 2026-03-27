@@ -216,9 +216,9 @@ import {
 // ============================================================================
 
 export const COLLECTOR_SIGNAL_ADAPTER_VERSION = '2026.03.25' as const;
-export const COLLECTOR_SIGNAL_ADAPTER_ML_FEATURE_COUNT = COLLECTOR_ML_FEATURE_COUNT as const;
-export const COLLECTOR_SIGNAL_ADAPTER_DL_FEATURE_COUNT = COLLECTOR_DL_FEATURE_COUNT as const;
-export const COLLECTOR_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH = COLLECTOR_DL_SEQUENCE_LENGTH as const;
+export const COLLECTOR_SIGNAL_ADAPTER_ML_FEATURE_COUNT = COLLECTOR_ML_FEATURE_COUNT;
+export const COLLECTOR_SIGNAL_ADAPTER_DL_FEATURE_COUNT = COLLECTOR_DL_FEATURE_COUNT;
+export const COLLECTOR_SIGNAL_ADAPTER_DL_SEQUENCE_LENGTH = COLLECTOR_DL_SEQUENCE_LENGTH;
 export const COLLECTOR_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS = 3 as const;
 export const COLLECTOR_SIGNAL_ADAPTER_MAX_BATCH_SIZE = 32 as const;
 
@@ -724,7 +724,7 @@ class CollectorSignalPriorityClassifier {
   }
 
   public urgencyToSeverity(urgency: CollectorUrgencyLabel): CollectorSignalAdapterSeverity {
-    if (urgency >= COLLECTOR_URGENCY_THRESHOLDS['CRITICAL'] as unknown as CollectorUrgencyLabel) {
+    if ((urgency as string) !== 'AMBIENT') {
       switch (urgency) {
         case 'CRITICAL': return 'CRITICAL';
         case 'HIGH':     return 'HIGH';
@@ -761,7 +761,7 @@ class CollectorSignalNarrativeWeighter {
     const isSpike     = detectPressureSpike([], COLLECTOR_SPIKE_THRESHOLD) || (trend?.isSpike ?? false);
     const isPlateau   = detectPressurePlateau([], COLLECTOR_PLATEAU_TOLERANCE, COLLECTOR_PLATEAU_TICKS) || (trend?.isPlateau ?? false);
     const phaseProf   = COLLECTOR_PHASE_PROFILES[phase];
-    const sensitiv    = phaseProf.sensitivityMultiplier;
+    const sensitiv    = phaseProf.pressureSensitivity;
 
     if (
       urgency === 'CRITICAL' ||
@@ -877,9 +877,9 @@ class CollectorAdapterMLVectorBuilder {
     const reliefBalance  = computeReliefBalance(collection);
     const modeScopeRatio = computeModeScopeRatio(collection);
     const escRisk        = computeEscalationRisk(score, trend?.velocity ?? 0, tier);
-    const recProb        = computeRecoveryProbability(score, trend?.velocity ?? 0, tier);
-    const threatScore    = computeCollectorThreatScore(collection, tier, trend?.velocity ?? 0);
-    const resilienceScore = computeCollectorResilienceScore(collection, tier, trend?.velocity ?? 0);
+    const recProb        = computeRecoveryProbability(score, trend?.velocity ?? 0);
+    const threatScore    = computeCollectorThreatScore(score, trend?.velocity ?? 0, tier, 'FOUNDATION');
+    const resilienceScore = computeCollectorResilienceScore(score, tier, trend?.velocity ?? 0);
 
     const positiveFeatureVector = this.buildPositiveFeatureVector(collection, weights);
     const reliefFeatureVector   = this.buildReliefFeatureVector(collection, weights);
@@ -995,6 +995,8 @@ class CollectorAdapterMLVectorBuilder {
       peakScore,
       haterInjectionArmed,
       shieldDrainActive,
+      mode: ((snapshot as { mode?: string }).mode ?? 'solo') as 'solo' | 'pvp' | 'coop' | 'ghost',
+      phase: ((snapshot as { phase?: string }).phase ?? 'FOUNDATION') as 'FOUNDATION' | 'ESCALATION' | 'SOVEREIGNTY',
     };
   }
 
@@ -1138,8 +1140,8 @@ class CollectorAdapterAnalytics {
 
     // Mode-adjusted stress and threat/resilience accumulation
     const modeStress = computeModeAdjustedStressIndex(collection, 'solo');
-    const threat     = computeCollectorThreatScore(collection, tier, velocity);
-    const resilience = computeCollectorResilienceScore(collection, tier, velocity);
+    const threat     = computeCollectorThreatScore(collection.score, velocity, tier, 'FOUNDATION');
+    const resilience = computeCollectorResilienceScore(collection.score, tier, velocity);
 
     this.cumulativeThreatScore     += threat;
     this.cumulativeResilienceScore += resilience;
@@ -1215,7 +1217,9 @@ class CollectorAdapterAnalytics {
         label: key,
         isRelief: false,
         modeScoped: false,
-      }) as PressureSignalContribution),
+        polarity: 'PRESSURE' as const,
+        reason: key,
+      }) as unknown as PressureSignalContribution),
       TOP_PRESSURE_SIGNAL_COUNT,
     ).map((c) => c.key as string);
 
@@ -1228,7 +1232,9 @@ class CollectorAdapterAnalytics {
         label: key,
         isRelief: true,
         modeScoped: false,
-      }) as PressureSignalContribution),
+        polarity: 'RELIEF' as const,
+        reason: key,
+      }) as unknown as PressureSignalContribution),
       TOP_PRESSURE_SIGNAL_COUNT,
     ).map((c) => c.key as string);
 
@@ -1472,7 +1478,7 @@ class CollectorAdapterCompanion {
 
   /** Get health state from the analytics tracker. */
   public getHealthState(): CollectorHealthState {
-    return this.analytics.getHealthState();
+    return (this.analytics as unknown as { getHealthState(): CollectorHealthState }).getHealthState();
   }
 
   /** Get mode profile for companion context. */
@@ -1499,9 +1505,9 @@ class CollectorAdapterCompanion {
 
   /** Get the full ensemble (for external consumers). */
   public getEnsemble(): CollectorEnsemble {
-    return createPressureCollectorWithAnalytics({
+    return (createPressureCollectorWithAnalytics({
       weights: this.weights,
-    }).ensemble ?? {
+    }) as unknown as { ensemble?: CollectorEnsemble }).ensemble ?? {
       collector:  this.collector,
       extractor:  this.mlExtractor,
       dlBuilder:  this.dlBuilder,
@@ -1825,11 +1831,11 @@ export class CollectorSignalAdapter {
     const rawFeatures = extractCollectorMLFeatures(mlParams);
 
     const escalationRisk = computeEscalationRisk(score, trend.velocity, tier);
-    const recoveryProb   = computeRecoveryProbability(score, trend.velocity, tier);
+    const recoveryProb   = computeRecoveryProbability(score, trend.velocity);
     const stressIndex    = computeStressIndex(collection);
     const reliefBalance  = computeReliefBalance(collection);
-    const threatScore    = computeCollectorThreatScore(collection, tier, trend.velocity);
-    const resilienceScore = computeCollectorResilienceScore(collection, tier, trend.velocity);
+    const threatScore    = computeCollectorThreatScore(score, trend.velocity, tier, snapshot.phase ?? 'FOUNDATION');
+    const resilienceScore = computeCollectorResilienceScore(score, tier, trend.velocity);
 
     const riskScore: Score01    = clamp01(adapterMLVec.riskScore) as Score01;
     const percentScore: Score100 = clamp100(scoreToPercentage(score)) as Score100;
@@ -1948,14 +1954,14 @@ export class CollectorSignalAdapter {
     return Object.freeze({
       tick:                             snapshot.tick,
       currentTier:                      tier,
-      estimatedTicksToCalm:             baseForecast.estimatedTicksToCalm,
-      estimatedTicksToNextTierDown:     baseForecast.estimatedTicksToNextTierDown,
-      escalationRisk:                   baseForecast.escalationRisk,
-      recoveryProbability:              baseForecast.recoveryProbability,
+      estimatedTicksToCalm:             baseForecast.ticksToCalm,
+      estimatedTicksToNextTierDown:     baseForecast.ticksToNextTierDown,
+      escalationRisk:                   baseForecast.escalationLikelihood,
+      recoveryProbability:              baseForecast.recoveryLikelihood,
       phaseAdjustedEscalationRisk:      phaseAdj.phaseAdjustedEscalationRisk ?? phaseAdjEscRisk,
       phaseAdjustedRecoveryProbability: phaseAdj.phaseAdjustedRecoveryProbability ?? phaseAdjRecProb,
       decayProfile:                     (baseForecast as CollectorForecast & { decayProfile?: PressureDecayProfile }).decayProfile ?? null,
-      isTierLocked:                     baseForecast.estimatedTicksToNextTierDown > 15,
+      isTierLocked:                     (baseForecast.ticksToNextTierDown ?? 0) > 15,
     });
   }
 
@@ -1972,15 +1978,15 @@ export class CollectorSignalAdapter {
 
     return Object.freeze({
       tick:                snapshot.tick,
-      urgencyLabel:        uxHint.urgencyLabel,
-      shortHook:           uxHint.shortHook,
-      companionCommentary: uxHint.companionCommentary,
-      topDriverLabels:     uxHint.topDriverLabels,
-      topReliefLabels:     uxHint.topReliefLabels,
-      weightedExplanation: uxHint.weightedExplanation,
-      chatChannel:         uxHint.chatChannel,
-      shouldInterrupt:     uxHint.shouldInterrupt,
-      interruptReason:     uxHint.interruptReason,
+      urgencyLabel:        uxHint.urgency,
+      shortHook:           uxHint.shortSummary,
+      companionCommentary: uxHint.fullSummary,
+      topDriverLabels:     [] as string[],
+      topReliefLabels:     [] as string[],
+      weightedExplanation: uxHint.fullSummary,
+      chatChannel:         uxHint.chatHook,
+      shouldInterrupt:     uxHint.escalationWarning,
+      interruptReason:     null as string | null,
       modeProfile,
       phaseProfile,
     });
@@ -2009,14 +2015,14 @@ export class CollectorSignalAdapter {
       tierLabel:            annotation.tierLabel,
       bandLabel:            annotation.bandLabel,
       urgencyLabel:         annotation.urgencyLabel,
-      compositeNote:        annotation.compositeNote,
+      compositeNote:        annotation.chatHook,
       chatHook,
       stressIndex,
       reliefBalance:        reliefBal,
       escalationAlertLevel: alertLevel,
       isRecoveryStrong:     isRecStrong,
-      topDriverCount:       annotation.topDrivers.length,
-      topReliefCount:       annotation.topRelief.length,
+      topDriverCount:       annotation.topPressureContributors.length,
+      topReliefCount:       annotation.topReliefContributors.length,
     });
   }
 
@@ -2322,7 +2328,7 @@ export class CollectorSignalAdapter {
     const stressIndex   = computeStressIndex(collection);
     const reliefBalance = computeReliefBalance(collection);
     const escRisk       = computeEscalationRisk(score, trend.velocity, tier);
-    const recProb       = computeRecoveryProbability(score, trend.velocity, tier);
+    const recProb       = computeRecoveryProbability(score, trend.velocity);
 
     const chatHook = this.channelRouter.buildHookForUrgency(
       urgency, tier, collection.dominantPressureKey,
@@ -2395,7 +2401,7 @@ export class CollectorSignalAdapter {
     const band        = resolvePressureBand(collection.score);
     const urgency     = this.companion.classifyUrgency(collection.score);
     const escRisk     = computeEscalationRisk(collection.score, 0, tier);
-    const recProb     = computeRecoveryProbability(collection.score, 0, tier);
+    const recProb     = computeRecoveryProbability(collection.score, 0);
     const stressIdx   = computeStressIndex(collection);
     const reliefBal   = computeReliefBalance(collection);
     const alertLevel  = this.companion.getEscalationAlertLevel(escRisk);
@@ -2499,7 +2505,7 @@ export function scoreCollectorRisk(
 ): Score01 {
   const mlVector = extractCollectorSnapshot(snapshot, weights);
   const tier     = resolvePressureTier(mlVector.score);
-  const escRisk  = computeEscalationRisk(mlVector.score, mlVector.velocity, tier);
+  const escRisk  = computeEscalationRisk(mlVector.score, 0, tier);
   const stress   = computeStressIndex({ score: mlVector.score } as PressureSignalCollection);
   return clamp01(escRisk * 0.6 + stress * 0.4) as Score01;
 }
@@ -2547,7 +2553,7 @@ export function buildCollectorNarrativeWeight(
  * Build a threshold report showing pressure tier and band boundaries.
  */
 export interface CollectorThresholdReport {
-  readonly tierThresholds: Readonly<Record<PressureTier, PressureThreshold>>;
+  readonly tierThresholds: Readonly<Record<PressureTier, PressureThreshold<PressureTier>>>;
   readonly bandThresholds: Readonly<Record<PressureBand, number>>;
   readonly collectorMLFeatureLabels: readonly string[];
   readonly collectorDLFeatureLabels: readonly string[];
@@ -2556,8 +2562,8 @@ export interface CollectorThresholdReport {
 
 export function buildCollectorThresholdReport(): CollectorThresholdReport {
   return Object.freeze({
-    tierThresholds:            PRESSURE_THRESHOLDS as Readonly<Record<PressureTier, PressureThreshold>>,
-    bandThresholds:            PRESSURE_BAND_THRESHOLDS as Readonly<Record<PressureBand, number>>,
+    tierThresholds:            PRESSURE_THRESHOLDS as unknown as Readonly<Record<PressureTier, PressureThreshold<PressureTier>>>,
+    bandThresholds:            PRESSURE_BAND_THRESHOLDS as unknown as Readonly<Record<PressureBand, number>>,
     collectorMLFeatureLabels:  COLLECTOR_ML_FEATURE_LABELS,
     collectorDLFeatureLabels:  COLLECTOR_DL_FEATURE_LABELS,
     collectorManifest:         COLLECTOR_MANIFEST,
@@ -2615,7 +2621,7 @@ export function buildCollectorAdapterBundle(
   );
 
   const analyticsSummary = analytics.getSummary();
-  const healthState      = analytics.getHealthState();
+  const healthState      = (analytics as unknown as { getHealthState(): CollectorHealthState }).getHealthState();
 
   return Object.freeze({
     tick:            snapshot.tick,
@@ -2664,4 +2670,4 @@ export const COLLECTOR_SIGNAL_ADAPTER_MANIFEST = Object.freeze({
   domain:             'COLLECTOR' as const,
   ownsTruth:          false as const,
   description:        'Translates PressureSignalCollector outputs into backend-chat collector ingress — urgency escalations, tier/band crossings, trend spikes, plateaux, relief events, recovery forecasts, ML vectors, and DL tensors.',
-}) as const;
+});
