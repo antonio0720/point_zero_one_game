@@ -272,7 +272,9 @@ export * as Time from './time';
  * ZERO_DIAGNOSTICS_TREND_ANALYZER, ZERO_DIAGNOSTICS_SESSION_ANALYTICS,
  * ZERO_DEFAULT_DIAGNOSTICS_ML_VECTOR, ZERO_DEFAULT_DIAGNOSTICS_DL_TENSOR,
  * ZERO_DEFAULT_DIAGNOSTICS_CHAT_SIGNAL), OrchestratorHealthReport
- * (health aggregation), OrchestratorTelemetry (telemetry collection),
+ * (health aggregation), OrchestratorTelemetry (telemetry collection with
+ * 32-dim ML vector, 8×4 DL tensor, TelemetryChatSignal, trend analysis,
+ * session tracking, annotation bundles, event log, and run summary),
  * RuntimeCheckpointCoordinator (snapshot checkpoints), RunCommandGateway
  * (command surface), RunQueryService (query surface), StepTracePublisher
  * (trace publication), RunBootstrapPipeline (run start), RunShutdownPipeline
@@ -366,6 +368,49 @@ export * as Time from './time';
  *   //            Zero.classifyEngineStatusSeverity(status)
  *   //            Zero.isTerminalEngineStatus(status)
  *   //            Zero.isImpairedEngineStatus(status)
+ *
+ * OrchestratorTelemetry entry points (all under Zero.*):
+ *   const bundle = Zero.createOrchestratorTelemetryWithAnalytics({ sessionId });
+ *   bundle.telemetry.recordTick({ snapshot, tickDurationMs, capturedAtMs });
+ *   bundle.telemetry.recordStepTrace(record);
+ *   bundle.telemetry.recordEngineHealth(health);
+ *   const snap    = bundle.telemetry.snapshot();         // OrchestratorTelemetrySnapshot
+ *   const export_ = bundle.captureAndRecord();           // TelemetryExportBundle
+ *   const signal  = bundle.captureAndSignal();           // TelemetryChatSignal
+ *   const mlVec   = bundle.extractMLVector();            // 32-dim TelemetryMLVector
+ *   const tensor  = bundle.buildDLTensor();              // 8×4 TelemetryDLTensor
+ *   const trend   = bundle.getTrend();                   // TelemetryTrendSnapshot | null
+ *   const report  = bundle.getSessionReport();           // TelemetrySessionReport
+ *   const runSum  = bundle.buildRunSummary();            // TelemetryRunSummary
+ *   // Singletons: Zero.ZERO_TELEMETRY_ML_EXTRACTOR
+ *   //             Zero.ZERO_TELEMETRY_DL_BUILDER
+ *   //             Zero.ZERO_TELEMETRY_ANNOTATOR
+ *   //             Zero.ZERO_TELEMETRY_INSPECTOR
+ *   //             Zero.ZERO_DEFAULT_TELEMETRY_ML_VECTOR
+ *   //             Zero.ZERO_DEFAULT_TELEMETRY_DL_TENSOR
+ *   //             Zero.ZERO_DEFAULT_TELEMETRY_CHAT_SIGNAL
+ *   // Constants:  Zero.TELEMETRY_ML_FEATURE_LABELS (32)
+ *   //             Zero.TELEMETRY_TICK_STEP_ORDER (13 steps)
+ *   //             Zero.ENGINE_SIGNAL_SEVERITY_SCORE
+ *   //             Zero.ENGINE_SIGNAL_SEVERITY_WEIGHT
+ *   //             Zero.ENGINE_HEALTH_STATUS_SCORE
+ *   //             Zero.ENGINE_HEALTH_STATUS_URGENCY_WEIGHT
+ *   // Utilities:  Zero.extractTelemetryMLVector(snap)
+ *   //             Zero.buildTelemetryDLTensor(snap)
+ *   //             Zero.buildTelemetryChatSignal(snap)
+ *   //             Zero.buildTelemetryAnnotations(snap)
+ *   //             Zero.classifyTelemetrySeverity(snap)
+ *   //             Zero.validateTelemetryMLVector(vec)
+ *   //             Zero.flattenTelemetryDLTensor(tensor)
+ *   //             Zero.buildTelemetryMLNamedMap(vec)
+ *   //             Zero.extractTelemetryDLColumn(tensor, col)
+ *   //             Zero.computeTelemetryMLSimilarity(a, b)
+ *   //             Zero.getTopTelemetryFeatures(vec, topN)
+ *   //             Zero.scoreTelemetryEngineHealth(entry)
+ *   //             Zero.getTelemetryEngineHealthSeverityLabel(entry)
+ *   //             Zero.getTelemetrySignalSeverityWeight(severity)
+ *   //             Zero.isTelemetryEnginePhaseStep(step)
+ *   //             Zero.getTelemetryStepBudgetMs(step)
  *
  * Usage:
  *   import { Zero } from '../../engine';

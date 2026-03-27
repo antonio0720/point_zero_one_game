@@ -4282,6 +4282,26 @@ export {
 } from './OrchestratorHealthSignalAdapter';
 
 // ============================================================================
+// MARK: OrchestratorTelemetrySignalAdapter — Engine 0 telemetry → LIVEOPS
+// ============================================================================
+
+export {
+  OrchestratorTelemetrySignalAdapter,
+  ORCHESTRATOR_TELEMETRY_DEFAULT_ADAPTER,
+  ORCHESTRATOR_TELEMETRY_STRICT_ADAPTER,
+  ORCHESTRATOR_TELEMETRY_VERBOSE_ADAPTER,
+  type TelemetryChatSignalCompat,
+  type TelemetryMLVectorCompat,
+  type TelemetryMLVectorSignal,
+  type TelemetryTrendSignalCompat,
+  type TelemetrySessionSignalCompat,
+  type TelemetryAnnotationCompat,
+  type TelemetryAnnotationBundleCompat,
+  type TelemetryDLTensorCompat,
+  type OrchestratorTelemetryAdapterMode,
+} from './OrchestratorTelemetrySignalAdapter';
+
+// ============================================================================
 // MARK: Final default export
 // ============================================================================
 
