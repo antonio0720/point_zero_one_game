@@ -425,7 +425,7 @@ export class DecaySignalAdapter {
   public constructor(options: DecaySignalAdapterOptions) {
     this.options = {
       defaultRoomId: options.defaultRoomId,
-      defaultVisibleChannel: options.defaultVisibleChannel ?? 'SYSTEM_SHADOW',
+      defaultVisibleChannel: options.defaultVisibleChannel ?? 'LOBBY',
       dedupeWindowTicks: options.dedupeWindowTicks ?? DECAY_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
       maxHistory: options.maxHistory ?? PRESSURE_HISTORY_DEPTH,
       forecastDeltaThreshold: options.forecastDeltaThreshold ?? DECAY_ADAPTER_FORECAST_DELTA_THRESHOLD,
@@ -1194,7 +1194,7 @@ export function getDecayChatChannel(
   if (tierConfig.allowsHaterInjection || result.appliedTier === 'T4') return 'GLOBAL';
   if (rankPressureTier(result.appliedTier) >= rankPressureTier('T3')) return 'SYNDICATE';
   if (rankPressureTier(result.appliedTier) >= rankPressureTier('T2')) return 'DEAL_ROOM';
-  return 'SYSTEM_SHADOW';
+  return 'LOBBY';
 }
 
 /**
