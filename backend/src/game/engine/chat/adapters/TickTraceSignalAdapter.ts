@@ -320,7 +320,7 @@ export class TickTraceSignalAdapter {
   public constructor(options: TickTraceSignalAdapterOptions) {
     this._opts = {
       defaultRoomId: options.defaultRoomId,
-      defaultVisibleChannel: options.defaultVisibleChannel ?? 'GAME',
+      defaultVisibleChannel: options.defaultVisibleChannel ?? 'LOBBY',
       dedupeWindowMs: options.dedupeWindowMs ?? DEFAULT_DEDUPE_WINDOW_MS,
       maxHistory: options.maxHistory ?? DEFAULT_MAX_HISTORY,
       anomalyThreshold: options.anomalyThreshold ?? DEFAULT_ANOMALY_THRESHOLD,
@@ -407,12 +407,14 @@ export class TickTraceSignalAdapter {
     }
     if (context.source) details['source'] = context.source;
 
-    const envelope: ChatInputEnvelope = Object.freeze({
-      roomId: String(roomId),
-      visibleChannel: routeChannel,
-      emittedAt: asUnixMs(context.emittedAt ?? now),
-      payload: Object.freeze({
+    const emittedAt = asUnixMs(context.emittedAt ?? now);
+    const signalPayload: ChatSignalEnvelope = Object.freeze({
+      type: 'RUN',
+      emittedAt,
+      roomId: String(roomId) as ChatRoomId,
+      metadata: Object.freeze({
         eventName,
+        visibleChannel: routeChannel,
         surface: 'tick_trace',
         tick: signal.tick,
         runId: signal.runId,
@@ -421,15 +423,20 @@ export class TickTraceSignalAdapter {
         severity,
         narrativeWeight,
         anomalyScore,
-        message: signal.message,
-        details: Object.freeze(details),
-        tags: Object.freeze([
+        ...(signal.message != null ? { message: signal.message } : {}),
+        details,
+        tags: [
           ...(context.tags ?? []),
           `step:${signal.step}`,
           `kind:${signal.kind}`,
           `severity:${severity.toLowerCase()}`,
-        ]),
-      }),
+        ],
+      }) as Readonly<Record<string, JsonValue>>,
+    });
+    const envelope: ChatInputEnvelope = Object.freeze({
+      kind: 'RUN_SIGNAL',
+      emittedAt,
+      payload: signalPayload,
     });
 
     const artifact: TickTraceSignalAdapterArtifact = Object.freeze({
