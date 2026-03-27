@@ -182,3 +182,30 @@ export * as Shield from './shield';
  *   const grade = Sovereignty.normalizeGrade(snapshot.sovereignty.verifiedGrade);
  */
 export * as Sovereignty from './sovereignty';
+
+/**
+ * Time subsystem — authoritative backend time lane.
+ *
+ * Covers: TimeEngine (Engine 1/7, STEP_02_TIME), TickScheduler (cadence shell),
+ * TickTierPolicy (tier→duration resolution), TickRateInterpolator (smooth tier
+ * transitions), DecisionExpiryResolver (forced-card expiry), DecisionTimer
+ * (countdown driver), HoldActionLedger (hold freeze management),
+ * RunTimeoutGuard (season budget enforcement), SeasonClock (real-world calendar),
+ * TimeBudgetService (budget arithmetic), TimeSnapshotProjector (snapshot advance),
+ * TimeTelemetryProjector (telemetry append), TimeEventEmitter (event publication),
+ * and the full contracts surface (cadence resolution, ML 28-dim vector, DL 40×6
+ * tensor, chat bridge signals, risk assessment, decision batch analysis, and
+ * runtime summary projection).
+ *
+ * All time truth flows through this namespace. The TimeEngine is wired into the
+ * EngineOrchestrator at STEP_02_TIME. TimeContractChatSignal is consumed by
+ * the chat lane's LIVEOPS_SIGNAL adapter.
+ *
+ * Usage:
+ *   import { Time } from '../../engine';
+ *   const engine = new Time.TimeEngine(deps);
+ *   const cadence = engine.resolveCadence(snapshot);
+ *   const mlVec = Time.extractTimeContractMLVector(...);
+ *   const chatSignal = Time.buildTimeContractChatSignal(...);
+ */
+export * as Time from './time';

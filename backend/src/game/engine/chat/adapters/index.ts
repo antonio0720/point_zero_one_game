@@ -850,6 +850,146 @@ import {
   type ProofSignalAdapterStats,
 } from './ProofGeneratorSignalAdapter';
 
+import {
+  ReplayIntegritySignalAdapter,
+  createReplayIntegritySignalAdapter,
+  buildIntegritySignalPayload,
+  adaptAllIntegritySignals,
+  adaptIntegrityBundle,
+  adaptIntegrityAuditBatch,
+  integrityStatusHeadline,
+  integrityStatusCoachingMessage,
+  anomalyHeadline,
+  anomalyCoachingMessage,
+  auditEntryMessage,
+  INTEGRITY_SIGNAL_ADAPTER_MANIFEST,
+  type IntegrityResultCompat,
+  type IntegrityMLVectorCompat,
+  type IntegrityDLTensorCompat,
+  type IntegrityAuditEntryCompat,
+  type IntegritySignalAdapterContext,
+  type IntegritySignalAdapterLogger,
+  type IntegritySignalAdapterClock,
+  type IntegritySignalAdapterSeverity,
+  type IntegritySignalAdapterEventName,
+  type ReplayIntegritySignalAdapterOptions,
+  type IntegritySignalAdapterStats,
+} from './ReplayIntegritySignalAdapter';
+
+import {
+  RunGradeSignalAdapter,
+  createRunGradeSignalAdapter,
+  buildGradeSignalPayload,
+  adaptAllGradeSignals,
+  adaptGradeBundle,
+  adaptGradeAuditBatch,
+  gradeHeadline as gradeAdapterHeadline,
+  gradeCoachingMessage as gradeAdapterCoachingMessage,
+  badgeHeadline,
+  badgeCoachingMessage,
+  comparisonHeadline,
+  comparisonCoachingMessage,
+  gradeAuditMessage,
+  GRADE_SIGNAL_ADAPTER_MANIFEST,
+  type GradeResultCompat,
+  type GradeMLVectorCompat,
+  type GradeDLTensorCompat,
+  type GradeAuditEntryCompat,
+  type GradeComparisonCompat,
+  type GradeSignalAdapterContext,
+  type GradeSignalAdapterLogger,
+  type GradeSignalAdapterClock,
+  type GradeSignalAdapterSeverity,
+  type GradeSignalAdapterEventName,
+  type RunGradeSignalAdapterOptions,
+  type GradeSignalAdapterStats,
+} from './RunGradeSignalAdapter';
+
+import {
+  SovereigntyExportSignalAdapter,
+  createSovereigntyExportSignalAdapter,
+  buildExportSignalPayload,
+  buildProofCardPayload,
+  adaptAllExportSignals,
+  adaptExportBundle,
+  adaptExportAuditBatch,
+  artifactFormatHeadline,
+  artifactCoachingMessage,
+  gradeExportNote,
+  proofCardHeadline,
+  proofCardCoachingMessage,
+  leaderboardHeadline,
+  leaderboardCoachingMessage,
+  gradeNarrativeHeadline,
+  auditEntryHeadline,
+  batchCompleteHeadline,
+  batchCompleteCoachingMessage,
+  EXPORT_SIGNAL_ADAPTER_MANIFEST,
+  type ExportArtifactCompat,
+  type ProofCardCompat,
+  type ExportMLVectorCompat,
+  type ExportDLTensorCompat,
+  type ExportAuditEntryCompat,
+  type LeaderboardProjectionCompat,
+  type ExplorerCardCompat,
+  type GradeNarrativeCompat,
+  type ExportSignalAdapterContext,
+  type ExportSignalAdapterLogger,
+  type ExportSignalAdapterClock,
+  type ExportSignalAdapterSeverity,
+  type ExportSignalAdapterEventName,
+  type SovereigntyExportSignalAdapterOptions,
+  type ExportSignalAdapterStats,
+} from './SovereigntyExportSignalAdapter';
+
+import {
+  SovereigntyExporterSignalAdapter,
+  createSovereigntyExporterSignalAdapter,
+  adaptAllExporterSignals,
+  adaptExporterBundle,
+  EXPORTER_SIGNAL_ADAPTER_MANIFEST,
+  type ExporterPipelineResultCompat,
+  type ExporterMLVectorCompat as ExporterAdapterMLVectorCompat,
+  type ExporterDLTensorCompat as ExporterAdapterDLTensorCompat,
+  type ExporterAuditEntryCompat as ExporterAdapterAuditEntryCompat,
+  type ExporterSignalAdapterContext,
+  type SovereigntyExporterSignalAdapterOptions as ExporterSignalAdapterOptions,
+  type ExporterSignalAdapterStats,
+} from './SovereigntyExporterSignalAdapter';
+
+import {
+  PersistenceWriterSignalAdapter,
+  createPersistenceWriterSignalAdapter,
+  adaptAllPersistenceSignals,
+  adaptPersistenceBundle,
+  PERSISTENCE_SIGNAL_ADAPTER_MANIFEST,
+  type PersistenceEnvelopeCompat,
+  type PersistenceWriteStatsCompat,
+  type PersistenceMLVectorCompat as PersistenceAdapterMLVectorCompat,
+  type PersistenceDLTensorCompat as PersistenceAdapterDLTensorCompat,
+  type PersistenceAuditEntryCompat as PersistenceAdapterAuditEntryCompat,
+  type PersistenceSignalAdapterContext,
+  type PersistenceWriterSignalAdapterOptions as PersistenceSignalAdapterOptions,
+  type PersistenceSignalAdapterStats,
+} from './PersistenceWriterSignalAdapter';
+
+import {
+  SnapshotAdapterSignalAdapter,
+  createSnapshotAdapterSignalAdapter,
+  adaptSnapshotSummarySignals,
+  adaptSnapshotBundle,
+  SNAPSHOT_ADAPTER_SIGNAL_MANIFEST,
+  type TickRecordCompat,
+  type RunSummaryCompat,
+  type SnapshotDeltaCompat,
+  type AdapterMLVectorCompat as SnapshotAdapterMLVectorCompat,
+  type AdapterDLTensorCompat as SnapshotAdapterDLTensorCompat,
+  type AdapterAuditEntryCompat as SnapshotAdapterAuditEntryCompat,
+  type SnapshotAdapterSignalContext as SnapshotSignalAdapterContext,
+  type SnapshotAdapterSignalAdapterOptions,
+  type SnapshotAdapterSignalStats as SnapshotSignalAdapterStats,
+} from './SnapshotAdapterSignalAdapter';
+
 // ============================================================================
 // MARK: Re-export authoritative adapter modules and their key public surfaces
 // ============================================================================
@@ -1170,6 +1310,72 @@ export {
   integrityCoachingMessage,
   cordScoreMessage,
   PROOF_SIGNAL_ADAPTER_MANIFEST,
+  // ReplayIntegrity signal adapter — ReplayIntegrityChecker → sovereignty integrity chat lane
+  ReplayIntegritySignalAdapter,
+  createReplayIntegritySignalAdapter,
+  buildIntegritySignalPayload,
+  adaptAllIntegritySignals,
+  adaptIntegrityBundle,
+  adaptIntegrityAuditBatch,
+  integrityStatusHeadline,
+  integrityStatusCoachingMessage,
+  anomalyHeadline,
+  anomalyCoachingMessage,
+  auditEntryMessage,
+  INTEGRITY_SIGNAL_ADAPTER_MANIFEST,
+  // RunGrade signal adapter — RunGradeAssigner → sovereignty grade chat lane
+  RunGradeSignalAdapter,
+  createRunGradeSignalAdapter,
+  buildGradeSignalPayload,
+  adaptAllGradeSignals,
+  adaptGradeBundle,
+  adaptGradeAuditBatch,
+  gradeAdapterHeadline,
+  gradeAdapterCoachingMessage,
+  badgeHeadline,
+  badgeCoachingMessage,
+  comparisonHeadline,
+  comparisonCoachingMessage,
+  gradeAuditMessage,
+  GRADE_SIGNAL_ADAPTER_MANIFEST,
+  // SovereigntyExport signal adapter
+  SovereigntyExportSignalAdapter,
+  createSovereigntyExportSignalAdapter,
+  buildExportSignalPayload,
+  buildProofCardPayload,
+  adaptAllExportSignals,
+  adaptExportBundle,
+  adaptExportAuditBatch,
+  artifactFormatHeadline,
+  artifactCoachingMessage,
+  gradeExportNote,
+  proofCardHeadline,
+  proofCardCoachingMessage,
+  leaderboardHeadline,
+  leaderboardCoachingMessage,
+  gradeNarrativeHeadline,
+  auditEntryHeadline,
+  batchCompleteHeadline,
+  batchCompleteCoachingMessage,
+  EXPORT_SIGNAL_ADAPTER_MANIFEST,
+  // SovereigntyExporter signal adapter
+  SovereigntyExporterSignalAdapter,
+  createSovereigntyExporterSignalAdapter,
+  adaptAllExporterSignals,
+  adaptExporterBundle,
+  EXPORTER_SIGNAL_ADAPTER_MANIFEST,
+  // PersistenceWriter signal adapter
+  PersistenceWriterSignalAdapter,
+  createPersistenceWriterSignalAdapter,
+  adaptAllPersistenceSignals,
+  adaptPersistenceBundle,
+  PERSISTENCE_SIGNAL_ADAPTER_MANIFEST,
+  // SnapshotAdapter signal adapter
+  SnapshotAdapterSignalAdapter,
+  createSnapshotAdapterSignalAdapter,
+  adaptSnapshotSummarySignals,
+  adaptSnapshotBundle,
+  SNAPSHOT_ADAPTER_SIGNAL_MANIFEST,
 };
 
 export type {
@@ -1580,6 +1786,74 @@ export type {
   ProofSignalAdapterEventName,
   ProofGeneratorSignalAdapterOptions,
   ProofSignalAdapterStats,
+  // ReplayIntegrity signal adapter types
+  IntegrityResultCompat,
+  IntegrityMLVectorCompat,
+  IntegrityDLTensorCompat,
+  IntegrityAuditEntryCompat,
+  IntegritySignalAdapterContext,
+  IntegritySignalAdapterLogger,
+  IntegritySignalAdapterClock,
+  IntegritySignalAdapterSeverity,
+  IntegritySignalAdapterEventName,
+  ReplayIntegritySignalAdapterOptions,
+  IntegritySignalAdapterStats,
+  // RunGrade signal adapter types
+  GradeResultCompat,
+  GradeMLVectorCompat,
+  GradeDLTensorCompat,
+  GradeAuditEntryCompat,
+  GradeComparisonCompat,
+  GradeSignalAdapterContext,
+  GradeSignalAdapterLogger,
+  GradeSignalAdapterClock,
+  GradeSignalAdapterSeverity,
+  GradeSignalAdapterEventName,
+  RunGradeSignalAdapterOptions,
+  GradeSignalAdapterStats,
+  // SovereigntyExport signal adapter types
+  ExportArtifactCompat,
+  ProofCardCompat,
+  ExportMLVectorCompat,
+  ExportDLTensorCompat,
+  ExportAuditEntryCompat,
+  LeaderboardProjectionCompat,
+  ExplorerCardCompat,
+  GradeNarrativeCompat,
+  ExportSignalAdapterContext,
+  ExportSignalAdapterLogger,
+  ExportSignalAdapterClock,
+  ExportSignalAdapterSeverity,
+  ExportSignalAdapterEventName,
+  SovereigntyExportSignalAdapterOptions,
+  ExportSignalAdapterStats,
+  // SovereigntyExporter signal adapter types
+  ExporterPipelineResultCompat,
+  ExporterAdapterMLVectorCompat,
+  ExporterAdapterDLTensorCompat,
+  ExporterAdapterAuditEntryCompat,
+  ExporterSignalAdapterContext,
+  ExporterSignalAdapterOptions,
+  ExporterSignalAdapterStats,
+  // PersistenceWriter signal adapter types
+  PersistenceEnvelopeCompat,
+  PersistenceWriteStatsCompat,
+  PersistenceAdapterMLVectorCompat,
+  PersistenceAdapterDLTensorCompat,
+  PersistenceAdapterAuditEntryCompat,
+  PersistenceSignalAdapterContext,
+  PersistenceSignalAdapterOptions,
+  PersistenceSignalAdapterStats,
+  // SnapshotAdapter signal adapter types
+  TickRecordCompat,
+  RunSummaryCompat,
+  SnapshotDeltaCompat,
+  SnapshotAdapterMLVectorCompat,
+  SnapshotAdapterDLTensorCompat,
+  SnapshotAdapterAuditEntryCompat,
+  SnapshotSignalAdapterContext,
+  SnapshotAdapterSignalAdapterOptions,
+  SnapshotSignalAdapterStats,
 };
 
 // ============================================================================
@@ -2485,6 +2759,8 @@ export class BackendChatAdapterSuite {
       DECAY: emptyDomainCounters(),
       COLLECTOR: emptyDomainCounters(),
       SHIELD: emptyDomainCounters(),
+      SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+      SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
     });
 
     return Object.freeze({
@@ -2866,6 +3142,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -2919,6 +3197,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -2974,6 +3254,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -3019,6 +3301,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -3308,6 +3592,8 @@ function createEmptyMutableSuiteAccumulator(): MutableSuiteAccumulator {
       DECAY: { accepted: 0, deduped: 0, rejected: 0 },
       COLLECTOR: { accepted: 0, deduped: 0, rejected: 0 },
       SHIELD: { accepted: 0, deduped: 0, rejected: 0 },
+      SHIELD_LAYER_MANAGER: { accepted: 0, deduped: 0, rejected: 0 },
+      SHIELD_REPAIR_QUEUE: { accepted: 0, deduped: 0, rejected: 0 },
     },
   };
 }
@@ -3396,6 +3682,8 @@ function freezeMutableSuiteAccumulator(
       DECAY: value.counters.DECAY,
       COLLECTOR: value.counters.COLLECTOR,
       SHIELD: value.counters.SHIELD,
+      SHIELD_LAYER_MANAGER: value.counters.SHIELD_LAYER_MANAGER,
+      SHIELD_REPAIR_QUEUE: value.counters.SHIELD_REPAIR_QUEUE,
     }),
   });
 }
@@ -3683,6 +3971,72 @@ export const BACKEND_CHAT_ADAPTER_SUITE_BUNDLE: BackendChatAdapterSuiteBundle =
       BackendChatAdapterSuite,
     }),
   });
+
+// ============================================================================
+// MARK: TensionMetricsSignalAdapter — tension metrics → chat lane translation
+// ============================================================================
+
+export {
+  TensionMetricsSignalAdapter,
+  createTensionMetricsSignalAdapter,
+  adaptTensionMetricsSnapshot,
+  type AdapterAnalytics as TensionMetricsAdapterAnalytics,
+  type TensionMetricsSignal,
+} from './TensionMetricsSignalAdapter';
+
+// ============================================================================
+// MARK: TensionPolicySignalAdapter — tension policy resolution → chat lane
+// ============================================================================
+
+export {
+  TensionPolicySignalAdapter,
+  createTensionPolicySignalAdapter,
+  adaptTensionPolicyResult,
+  computePolicyRiskScore,
+  narratePolicyVisibilityChange,
+  narratePolicyQueueHealth,
+  resolvePolicySignalPriority,
+  resolvePolicySignalChannel,
+  extractPolicyMLFeatures,
+  TENSION_POLICY_SIGNAL_ADAPTER_VERSION,
+  TENSION_POLICY_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  TENSION_POLICY_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  TENSION_POLICY_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  TENSION_POLICY_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  POLICY_SIGNAL_PRIORITIES,
+  POLICY_PRIORITY_TO_CHANNEL_TABLE,
+  TENSION_POLICY_SIGNAL_ADAPTER_META,
+  type PolicySignalPriority,
+  type PolicyAdapterAnalytics,
+  type TensionPolicySignal,
+  type PolicyAdapterOptions,
+  type PolicyAdapterContext,
+  type PolicySignalBatch,
+  type PolicyMLExtract,
+} from './TensionPolicySignalAdapter';
+
+// ============================================================================
+// MARK: TensionThreatSourceSignalAdapter — threat discovery → chat lane
+// ============================================================================
+
+export {
+  TensionThreatSourceSignalAdapter,
+  createTensionThreatSourceSignalAdapter,
+  adaptThreatSourceBundle,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_VERSION,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_DL_FEATURE_COUNT,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  TENSION_THREAT_SOURCE_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  THREAT_SOURCE_SIGNAL_PRIORITIES,
+  type ThreatSourceSignalPriority,
+  type ThreatSourceAdapterAnalytics,
+  type TensionThreatSourceSignal,
+  type ThreatSourceAdapterOptions,
+  type ThreatSourceAdapterContext,
+  type ThreatSourceSignalBatch,
+  type ThreatSourceMLExtract,
+} from './TensionThreatSourceSignalAdapter';
 
 // ============================================================================
 // MARK: Final default export
