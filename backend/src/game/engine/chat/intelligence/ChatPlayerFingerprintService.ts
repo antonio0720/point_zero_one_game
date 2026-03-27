@@ -1545,9 +1545,9 @@ export class ChatPlayerFingerprintService {
   }
 
   private computeUpperCaseRatio(text: string): number {
-    const letters = text.match(/[A-Za-z]/g) ?? [];
+    const letters: string[] = (text.match(/[A-Za-z]/g) ?? []) as string[];
     if (letters.length === 0) return 0;
-    const upper = letters.filter((letter) => letter === letter.toUpperCase()).length;
+    const upper = letters.filter((letter: string) => letter === letter.toUpperCase()).length;
     return clamp01(upper / letters.length);
   }
 
