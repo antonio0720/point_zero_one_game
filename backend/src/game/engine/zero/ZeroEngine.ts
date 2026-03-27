@@ -703,7 +703,7 @@ export class ZeroEngine {
     // Create EngineOrchestrator
     const orchestratorOpts: EngineOrchestratorOptions = {
       clock: this.clock,
-      bus: this.bus as unknown as EventBus<EngineEventMap>,
+      bus: this.bus,
       registry: this.registry,
       modeDirector: this.modeDirector,
       cardRegistry: this.cardRegistry,
