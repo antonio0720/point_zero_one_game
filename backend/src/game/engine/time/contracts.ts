@@ -220,7 +220,7 @@ export const TIME_CONTRACT_HOLD_RESULT_LABELS: Readonly<
 export const TIME_CONTRACT_DEFAULT_ADVANCE_OPTIONS = Object.freeze({
   stopScheduling: false,
   overrideHoldCharges: undefined as number | undefined,
-  activeDecisionWindows: Object.freeze({}) as TimerState['activeDecisionWindows'],
+  activeDecisionWindows: Object.freeze({}) as unknown as TimerState['activeDecisionWindows'],
   frozenWindowIds: [] as readonly string[],
 });
 
