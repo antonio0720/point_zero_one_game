@@ -2759,6 +2759,8 @@ export class BackendChatAdapterSuite {
       DECAY: emptyDomainCounters(),
       COLLECTOR: emptyDomainCounters(),
       SHIELD: emptyDomainCounters(),
+      SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+      SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
     });
 
     return Object.freeze({
@@ -3140,6 +3142,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -3193,6 +3197,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -3248,6 +3254,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -3293,6 +3301,8 @@ export class BackendChatAdapterSuite {
         DECAY: emptyDomainCounters(),
         COLLECTOR: emptyDomainCounters(),
         SHIELD: emptyDomainCounters(),
+        SHIELD_LAYER_MANAGER: emptyDomainCounters(),
+        SHIELD_REPAIR_QUEUE: emptyDomainCounters(),
       }),
     });
   }
@@ -3582,6 +3592,8 @@ function createEmptyMutableSuiteAccumulator(): MutableSuiteAccumulator {
       DECAY: { accepted: 0, deduped: 0, rejected: 0 },
       COLLECTOR: { accepted: 0, deduped: 0, rejected: 0 },
       SHIELD: { accepted: 0, deduped: 0, rejected: 0 },
+      SHIELD_LAYER_MANAGER: { accepted: 0, deduped: 0, rejected: 0 },
+      SHIELD_REPAIR_QUEUE: { accepted: 0, deduped: 0, rejected: 0 },
     },
   };
 }
@@ -3670,6 +3682,8 @@ function freezeMutableSuiteAccumulator(
       DECAY: value.counters.DECAY,
       COLLECTOR: value.counters.COLLECTOR,
       SHIELD: value.counters.SHIELD,
+      SHIELD_LAYER_MANAGER: value.counters.SHIELD_LAYER_MANAGER,
+      SHIELD_REPAIR_QUEUE: value.counters.SHIELD_REPAIR_QUEUE,
     }),
   });
 }
@@ -4044,6 +4058,34 @@ export {
   type DecisionExpiryAdapterMLVector,
   type DecisionExpiryAdapterDLRow,
 } from './DecisionExpirySignalAdapter';
+
+// ============================================================================
+// MARK: DecisionTimerSignalAdapter — timer window state → LIVEOPS_SIGNAL lane
+// ============================================================================
+
+export {
+  DecisionTimerSignalAdapter,
+  createDecisionTimerSignalAdapter,
+  adaptTimerAnalyticsSignal,
+  extractBatchMLVectors,
+  buildBatchDLTensor,
+  buildSeasonTags,
+  computeSeasonPressureBoost,
+  shouldBypassDedup,
+  computeDecisionWindowAdapterScore,
+  DECISION_TIMER_SIGNAL_ADAPTER_VERSION,
+  DECISION_TIMER_SIGNAL_ADAPTER_ML_FEATURE_COUNT,
+  DECISION_TIMER_SIGNAL_ADAPTER_DL_COL_COUNT,
+  DECISION_TIMER_SIGNAL_ADAPTER_DEDUPE_WINDOW_TICKS,
+  DECISION_TIMER_SIGNAL_ADAPTER_MAX_BATCH_SIZE,
+  DECISION_TIMER_SIGNAL_PRIORITIES,
+  DECISION_TIMER_SIGNAL_ADAPTER_MODULE_METADATA,
+  type DecisionTimerSignalPriority,
+  type DecisionTimerAdapterAnalytics,
+  type DecisionTimerSignal,
+  type DecisionTimerAdapterMLVector,
+  type DecisionTimerAdapterDLRow,
+} from './DecisionTimerSignalAdapter';
 
 // ============================================================================
 // MARK: Final default export
