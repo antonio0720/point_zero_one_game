@@ -2942,5 +2942,1058 @@ export const RUN_TIMEOUT_GUARD_MANIFEST = Object.freeze({
     riskProjection: true,
     driftDetection: true,
     latencyAlarms: true,
+    sessionAnalytics: true,
+    budgetSimulation: true,
+    resilienceScoring: true,
+    pulseAnalysis: true,
+    trajectoryForecasting: true,
   }),
 } as const);
+
+/* ============================================================================
+ * § 31 — SESSION ANALYTICS TYPES
+ * ============================================================================ */
+
+/** Per-run session analytics aggregated across all resolve() calls. */
+export interface TimeoutSessionAnalyticsSnapshot {
+  readonly runId: string;
+  readonly totalResolveCalls: number;
+  readonly totalTimeoutDetections: number;
+  readonly firstCriticalTick: number | null;
+  readonly firstImminentTick: number | null;
+  readonly firstTimedOutTick: number | null;
+  readonly peakProximityScore: number;
+  readonly peakCriticality: BudgetCriticality;
+  readonly avgBudgetUtilizationPct: number;
+  readonly avgTickDurationMs: number;
+  readonly totalChatSignalsSent: number;
+  readonly phaseTransitionCount: number;
+  readonly driftAlarmCount: number;
+  readonly latencyAlarmCount: number;
+  readonly holdChargesConsumedEstimate: number;
+  readonly estimatedEfficiencyScore: number;
+  readonly sessionStartMs: number;
+  readonly lastUpdateMs: number;
+}
+
+/* ============================================================================
+ * § 32 — BUDGET SIMULATION TYPES
+ * ============================================================================ */
+
+/** A single simulated budget trajectory point. */
+export interface TimeoutBudgetSimPoint {
+  readonly tick: number;
+  readonly elapsedMs: number;
+  readonly remainingMs: number;
+  readonly utilizationFraction: number;
+  readonly criticality: BudgetCriticality;
+  readonly proximityScore: number;
+  readonly alertStage: TimeoutAlertStage;
+  readonly phase: RunPhase;
+}
+
+/** Result of a budget trajectory simulation. */
+export interface TimeoutBudgetSimResult {
+  readonly points: readonly TimeoutBudgetSimPoint[];
+  readonly projectedTimeoutTick: number | null;
+  readonly projectedTimeoutMs: number | null;
+  readonly willTimeout: boolean;
+  readonly timeoutProbability: number;
+  readonly sovereigntyReachable: boolean;
+  readonly peakCriticality: BudgetCriticality;
+  readonly simulatedTicks: number;
+  readonly avgTickDurationMs: number;
+}
+
+/* ============================================================================
+ * § 33 — RESILIENCE SCORE TYPES
+ * ============================================================================ */
+
+/** Resilience assessment for the current run state. */
+export interface TimeoutResilienceScore {
+  readonly score: number;            // 0-1: 1 = fully resilient, 0 = critically exposed
+  readonly label: string;            // human-readable
+  readonly budgetComponent: number;  // how much remaining budget contributes
+  readonly holdComponent: number;    // how much hold charges contribute
+  readonly phaseComponent: number;   // how much being in FOUNDATION contributes
+  readonly modeComponent: number;    // how much cooperative mode contributes
+  readonly pressureComponent: number;// how much low pressure contributes
+  readonly recommendations: readonly string[];
+}
+
+/* ============================================================================
+ * § 34 — PULSE ANALYSIS TYPES
+ * ============================================================================ */
+
+/** Represents a single pulse event in budget consumption. */
+export interface TimeoutBudgetPulse {
+  readonly tick: number;
+  readonly deltaFraction: number;   // change in utilization fraction since last pulse
+  readonly acceleration: number;    // positive = consumption speeding up
+  readonly phase: RunPhase;
+  readonly tier: PressureTier;
+  readonly isSpike: boolean;        // true if deltaFraction > PULSE_SPIKE_THRESHOLD
+  readonly recordedAtMs: number;
+}
+
+/** Pulse analysis summary over recent history. */
+export interface TimeoutPulseAnalysisSummary {
+  readonly recentPulses: readonly TimeoutBudgetPulse[];
+  readonly avgDeltaFraction: number;
+  readonly maxDeltaFraction: number;
+  readonly spikeCount: number;
+  readonly accelerationTrend: 'ACCELERATING' | 'STEADY' | 'DECELERATING';
+  readonly projectedExhaustTick: number | null;
+  readonly riskMultiplier: number;
+}
+
+/** Threshold above which a delta is classified as a spike. */
+export const TIMEOUT_PULSE_SPIKE_THRESHOLD = 0.05;
+
+/** Maximum pulse history entries retained. */
+export const TIMEOUT_PULSE_MAX_HISTORY = 20;
+
+/* ============================================================================
+ * § 35 — TIMEOUT SESSION ANALYTICS
+ * ============================================================================ */
+
+/**
+ * TimeoutSessionAnalytics
+ *
+ * Tracks per-run session state across multiple resolve() calls.
+ * Provides aggregate metrics about how the budget has been consumed,
+ * when critical thresholds were first crossed, and estimated player efficiency.
+ *
+ * Pure aggregate — no mutation of game state.
+ */
+export class TimeoutSessionAnalytics {
+  private runId: string = '';
+  private totalResolveCalls = 0;
+  private totalTimeoutDetections = 0;
+  private firstCriticalTick: number | null = null;
+  private firstImminentTick: number | null = null;
+  private firstTimedOutTick: number | null = null;
+  private peakProximityScore = 0;
+  private peakCriticality: BudgetCriticality = 'SAFE';
+  private utilizationSamples: number[] = [];
+  private tickDurationSamples: number[] = [];
+  private totalChatSignalsSent = 0;
+  private phaseTransitionCount = 0;
+  private driftAlarmCount = 0;
+  private latencyAlarmCount = 0;
+  private holdChargesConsumedEstimate = 0;
+  private sessionStartMs = 0;
+  private lastUpdateMs = 0;
+
+  /** Initialize the session tracker for a new run. */
+  public init(runId: string, nowMs: number): void {
+    this.runId = runId;
+    this.sessionStartMs = nowMs;
+    this.reset();
+  }
+
+  /** Record a resolve() event. */
+  public recordResolve(
+    resolution: RunTimeoutResolution,
+    proximity: TimeoutProximityResult,
+    alert: TimeoutAlert,
+    snapshot: RunStateSnapshot,
+    nowMs: number,
+  ): void {
+    this.totalResolveCalls++;
+    this.lastUpdateMs = nowMs;
+
+    // Track utilization
+    const util = clampFraction(
+      safeDivide(resolution.consumedBudgetMs, Math.max(1, resolution.totalBudgetMs)),
+    );
+    this.utilizationSamples.push(util);
+    if (this.utilizationSamples.length > 200) {
+      this.utilizationSamples.shift();
+    }
+
+    // Track tick duration
+    const td = normalizeMs(snapshot.timers.currentTickDurationMs);
+    if (td > 0) {
+      this.tickDurationSamples.push(td);
+      if (this.tickDurationSamples.length > 200) {
+        this.tickDurationSamples.shift();
+      }
+    }
+
+    // Track peak proximity
+    if (proximity.proximityScore > this.peakProximityScore) {
+      this.peakProximityScore = proximity.proximityScore;
+    }
+
+    // Track first critical tick
+    if (
+      alert.stage === 'CRITICAL'
+      && this.firstCriticalTick === null
+    ) {
+      this.firstCriticalTick = snapshot.tick;
+    }
+
+    // Track first imminent tick
+    if (
+      alert.stage === 'IMMINENT'
+      && this.firstImminentTick === null
+    ) {
+      this.firstImminentTick = snapshot.tick;
+    }
+
+    // Track timeouts
+    if (resolution.timeoutReached) {
+      this.totalTimeoutDetections++;
+      if (this.firstTimedOutTick === null) {
+        this.firstTimedOutTick = snapshot.tick;
+      }
+    }
+
+    // Track peak criticality progression
+    const critOrder: BudgetCriticality[] = ['SAFE', 'WARNING', 'CRITICAL', 'EXHAUSTED'];
+    const currentIdx = critOrder.indexOf(
+      classifyUtilization(util),
+    );
+    const peakIdx = critOrder.indexOf(this.peakCriticality);
+    if (currentIdx > peakIdx) {
+      this.peakCriticality = critOrder[currentIdx] ?? 'SAFE';
+    }
+  }
+
+  /** Record a chat signal emission. */
+  public recordChatSignal(): void {
+    this.totalChatSignalsSent++;
+  }
+
+  /** Record a phase transition. */
+  public recordPhaseTransition(): void {
+    this.phaseTransitionCount++;
+  }
+
+  /** Record a drift alarm. */
+  public recordDriftAlarm(): void {
+    this.driftAlarmCount++;
+  }
+
+  /** Record a latency alarm. */
+  public recordLatencyAlarm(): void {
+    this.latencyAlarmCount++;
+  }
+
+  /** Record hold charge consumption. */
+  public recordHoldChargeConsumed(): void {
+    this.holdChargesConsumedEstimate++;
+  }
+
+  /** Snapshot current session analytics. */
+  public snapshot(): TimeoutSessionAnalyticsSnapshot {
+    const avgUtil = this.utilizationSamples.length > 0
+      ? this.utilizationSamples.reduce((a, b) => a + b, 0) / this.utilizationSamples.length
+      : 0;
+    const avgTd = this.tickDurationSamples.length > 0
+      ? this.tickDurationSamples.reduce((a, b) => a + b, 0) / this.tickDurationSamples.length
+      : 0;
+
+    // Efficiency: inverse of how quickly they consumed budget
+    // Higher avgUtil late in the run = lower efficiency (they ran out fast)
+    const efficiencyScore = clampFraction(
+      1.0 - avgUtil * 0.5 - (this.driftAlarmCount * 0.02) - (this.latencyAlarmCount * 0.01),
+    );
+
+    return Object.freeze({
+      runId: this.runId,
+      totalResolveCalls: this.totalResolveCalls,
+      totalTimeoutDetections: this.totalTimeoutDetections,
+      firstCriticalTick: this.firstCriticalTick,
+      firstImminentTick: this.firstImminentTick,
+      firstTimedOutTick: this.firstTimedOutTick,
+      peakProximityScore: this.peakProximityScore,
+      peakCriticality: this.peakCriticality,
+      avgBudgetUtilizationPct: Math.round(avgUtil * 100),
+      avgTickDurationMs: Math.round(avgTd),
+      totalChatSignalsSent: this.totalChatSignalsSent,
+      phaseTransitionCount: this.phaseTransitionCount,
+      driftAlarmCount: this.driftAlarmCount,
+      latencyAlarmCount: this.latencyAlarmCount,
+      holdChargesConsumedEstimate: this.holdChargesConsumedEstimate,
+      estimatedEfficiencyScore: efficiencyScore,
+      sessionStartMs: this.sessionStartMs,
+      lastUpdateMs: this.lastUpdateMs,
+    });
+  }
+
+  /** Reset all session state (for run restart). */
+  public reset(): void {
+    this.totalResolveCalls = 0;
+    this.totalTimeoutDetections = 0;
+    this.firstCriticalTick = null;
+    this.firstImminentTick = null;
+    this.firstTimedOutTick = null;
+    this.peakProximityScore = 0;
+    this.peakCriticality = 'SAFE';
+    this.utilizationSamples = [];
+    this.tickDurationSamples = [];
+    this.totalChatSignalsSent = 0;
+    this.phaseTransitionCount = 0;
+    this.driftAlarmCount = 0;
+    this.latencyAlarmCount = 0;
+    this.holdChargesConsumedEstimate = 0;
+    this.lastUpdateMs = 0;
+  }
+}
+
+/* ============================================================================
+ * § 36 — TIMEOUT BUDGET SIMULATOR
+ * ============================================================================ */
+
+/**
+ * TimeoutBudgetSimulator
+ *
+ * Pure simulation engine. Given a snapshot and current budget state,
+ * projects the trajectory of budget consumption forward in time.
+ * Does NOT mutate any state — returns a fully computed simulation result.
+ *
+ * Used by:
+ * - Risk projectors that need trajectory curves
+ * - ML features that represent "will this run timeout?"
+ * - Chat signals that narrate "at your current pace…"
+ */
+export class TimeoutBudgetSimulator {
+  private readonly proximityScorer: TimeoutProximityScorer;
+  private readonly criticalityAssessor: BudgetCriticalityAssessor;
+
+  public constructor(
+    proximityScorer?: TimeoutProximityScorer,
+    criticalityAssessor?: BudgetCriticalityAssessor,
+  ) {
+    this.proximityScorer = proximityScorer ?? new TimeoutProximityScorer();
+    this.criticalityAssessor = criticalityAssessor ?? new BudgetCriticalityAssessor();
+  }
+
+  /**
+   * Simulate the run trajectory forward from current state.
+   * Models budget consumption tick by tick given current tick duration.
+   *
+   * @param snapshot      Current run state
+   * @param nextElapsedMs Current elapsed time
+   * @param totalBudgetMs Total budget ceiling
+   * @param maxSimTicks   Maximum ticks to simulate (default: 100)
+   */
+  public simulate(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+    totalBudgetMs: number,
+    maxSimTicks = 100,
+  ): TimeoutBudgetSimResult {
+    const tier = snapshot.pressure.tier;
+    const totalMs = Math.max(1, normalizeMs(totalBudgetMs));
+    const consumedMs = normalizeMs(nextElapsedMs);
+    const remainingMs = Math.max(0, totalMs - consumedMs);
+
+    if (remainingMs === 0) {
+      return this._buildExhaustedResult(snapshot, consumedMs, totalMs);
+    }
+
+    // Tick duration: use current from snapshot, fall back to tier default
+    const tickDurationMs = Math.max(
+      100,
+      normalizeMs(snapshot.timers.currentTickDurationMs)
+        || getDefaultTickDurationMs(tier),
+    );
+
+    const points: TimeoutBudgetSimPoint[] = [];
+    let simElapsed = consumedMs;
+    let projectedTimeoutTick: number | null = null;
+    let projectedTimeoutMs: number | null = null;
+    let peakCriticality: BudgetCriticality = 'SAFE';
+    let tick = snapshot.tick;
+
+    for (let step = 0; step < maxSimTicks; step++) {
+      simElapsed += tickDurationMs;
+      tick++;
+
+      const simRemaining = Math.max(0, totalMs - simElapsed);
+      const utilizationFraction = clampFraction(safeDivide(simElapsed, totalMs));
+      const criticality = classifyUtilization(utilizationFraction);
+      const phase = resolvePhaseFromElapsedMs(simElapsed);
+      const proximityScore = clampFraction(
+        utilizationFraction * TIMEOUT_PHASE_URGENCY_AMPLIFIER[phase],
+      );
+      const alertStage = classifyProximity(proximityScore);
+
+      // Track peak criticality
+      const critOrder: BudgetCriticality[] = ['SAFE', 'WARNING', 'CRITICAL', 'EXHAUSTED'];
+      const currentIdx = critOrder.indexOf(criticality);
+      const peakIdx = critOrder.indexOf(peakCriticality);
+      if (currentIdx > peakIdx) {
+        peakCriticality = critOrder[currentIdx] ?? 'SAFE';
+      }
+
+      const point: TimeoutBudgetSimPoint = Object.freeze({
+        tick,
+        elapsedMs: simElapsed,
+        remainingMs: simRemaining,
+        utilizationFraction,
+        criticality,
+        proximityScore,
+        alertStage,
+        phase,
+      });
+      points.push(point);
+
+      // Check timeout
+      if (simElapsed >= totalMs && projectedTimeoutTick === null) {
+        projectedTimeoutTick = tick;
+        projectedTimeoutMs = simElapsed;
+        break;
+      }
+
+      if (simRemaining === 0) break;
+    }
+
+    const willTimeout = projectedTimeoutTick !== null;
+
+    // Sovereignty reachable: can we hit the SOVEREIGNTY phase boundary?
+    const sovereigntyBoundary = PHASE_BOUNDARIES_MS.find(b => b.phase === 'SOVEREIGNTY');
+    const sovereigntyStartMs = sovereigntyBoundary?.startsAtMs ?? 0;
+    const sovereigntyReachable = consumedMs < sovereigntyStartMs
+      ? points.some(p => p.elapsedMs >= sovereigntyStartMs)
+      : true;
+
+    // Timeout probability: if no timeout detected, score based on remaining fraction
+    const timeoutProbability = willTimeout
+      ? 1.0
+      : clampFraction(
+          safeDivide(consumedMs, totalMs) * 1.1 + (snapshot.pressure.score / 100) * 0.1,
+        );
+
+    return Object.freeze({
+      points: Object.freeze(points),
+      projectedTimeoutTick,
+      projectedTimeoutMs,
+      willTimeout,
+      timeoutProbability,
+      sovereigntyReachable,
+      peakCriticality,
+      simulatedTicks: points.length,
+      avgTickDurationMs: tickDurationMs,
+    });
+  }
+
+  /**
+   * Quick timeout probability — scalar 0-1.
+   * Used as an ML feature for downstream models.
+   */
+  public quickTimeoutProbability(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+    totalBudgetMs: number,
+  ): number {
+    const totalMs = Math.max(1, normalizeMs(totalBudgetMs));
+    const consumedMs = normalizeMs(nextElapsedMs);
+    const utilizationFraction = clampFraction(safeDivide(consumedMs, totalMs));
+    const tier = snapshot.pressure.tier;
+    const tierUrgency = TIME_CONTRACT_TIER_URGENCY[tier];
+    const phaseAmplifier = TIMEOUT_PHASE_URGENCY_AMPLIFIER[snapshot.phase];
+    // Blend: utilization + tier urgency + phase amplification
+    return clampFraction(
+      utilizationFraction * 0.7
+      + tierUrgency * 0.15
+      + (phaseAmplifier - 1.0) * 0.15,
+    );
+  }
+
+  private _buildExhaustedResult(
+    snapshot: RunStateSnapshot,
+    consumedMs: number,
+    totalMs: number,
+  ): TimeoutBudgetSimResult {
+    const point: TimeoutBudgetSimPoint = Object.freeze({
+      tick: snapshot.tick,
+      elapsedMs: consumedMs,
+      remainingMs: 0,
+      utilizationFraction: 1.0,
+      criticality: 'EXHAUSTED',
+      proximityScore: 1.0,
+      alertStage: 'TIMED_OUT',
+      phase: snapshot.phase,
+    });
+    void totalMs; // used in utilization above
+    return Object.freeze({
+      points: Object.freeze([point]),
+      projectedTimeoutTick: snapshot.tick,
+      projectedTimeoutMs: consumedMs,
+      willTimeout: true,
+      timeoutProbability: 1.0,
+      sovereigntyReachable: snapshot.phase === 'SOVEREIGNTY',
+      peakCriticality: 'EXHAUSTED',
+      simulatedTicks: 1,
+      avgTickDurationMs: getDefaultTickDurationMs(snapshot.pressure.tier),
+    });
+  }
+}
+
+/* ============================================================================
+ * § 37 — TIMEOUT RESILIENCE SCORER
+ * ============================================================================ */
+
+/**
+ * TimeoutResilienceScorer
+ *
+ * Measures how resilient the current run is against a timeout outcome.
+ * Resilience is a composite of remaining budget, hold charges, phase,
+ * mode difficulty, and pressure tier.
+ *
+ * Score of 1.0 = fully resilient (well within budget).
+ * Score of 0.0 = critically exposed (at the edge of timeout).
+ *
+ * Pure function — no mutation, no state.
+ */
+export class TimeoutResilienceScorer {
+  /**
+   * Compute the full resilience score.
+   */
+  public score(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+    totalBudgetMs: number,
+  ): TimeoutResilienceScore {
+    const totalMs = Math.max(1, normalizeMs(totalBudgetMs));
+    const consumedMs = normalizeMs(nextElapsedMs);
+    const remainingMs = Math.max(0, totalMs - consumedMs);
+    const tier = snapshot.pressure.tier;
+    const phase = snapshot.phase;
+    const mode = snapshot.mode;
+
+    // Budget component: more remaining = more resilient
+    const remainingFraction = clampFraction(safeDivide(remainingMs, totalMs));
+    const budgetComponent = remainingFraction * 0.40;
+
+    // Hold component: hold charges give a safety net
+    const holdEnabled = snapshot.modeState.holdEnabled;
+    const holdCharges = Math.max(0, snapshot.timers.holdCharges);
+    const holdComponent = holdEnabled
+      ? clampFraction(safeDivide(holdCharges, 2)) * 0.20
+      : 0;
+
+    // Phase component: FOUNDATION = lots of time, SOVEREIGNTY = critical
+    const phaseResilience: Record<RunPhase, number> = {
+      FOUNDATION: 1.0,
+      ESCALATION: 0.6,
+      SOVEREIGNTY: 0.3,
+    };
+    const phaseComponent = phaseResilience[phase] * 0.20;
+
+    // Mode component: coop is easier on the clock
+    const modeResilience: Record<ModeCode, number> = {
+      solo: 0.5,
+      pvp: 0.3,
+      coop: 0.8,
+      ghost: 0.1,
+    };
+    const modeComponent = modeResilience[mode] * 0.10;
+
+    // Pressure component: T0 = resilient, T4 = not
+    const tierResilience: Record<PressureTier, number> = {
+      T0: 1.0,
+      T1: 0.75,
+      T2: 0.50,
+      T3: 0.25,
+      T4: 0.0,
+    };
+    const pressureComponent = tierResilience[tier] * 0.10;
+
+    const score = clampFraction(
+      budgetComponent + holdComponent + phaseComponent + modeComponent + pressureComponent,
+    );
+
+    const label = this._scoreLabel(score);
+
+    // Recommendations
+    const recommendations: string[] = [];
+    if (remainingFraction < 0.2) {
+      recommendations.push('Increase decision speed — budget is critically low');
+    }
+    if (holdEnabled && holdCharges > 0 && phase === 'SOVEREIGNTY') {
+      recommendations.push('Save hold charges for endgame decisions');
+    }
+    if (tier === 'T3' || tier === 'T4') {
+      recommendations.push(describePressureTierExperience(tier));
+    }
+    if (mode === 'ghost' && remainingFraction < 0.4) {
+      recommendations.push('Phantom mode: the clock is your greatest enemy');
+    }
+    if (MODE_DIFFICULTY_MULTIPLIER[mode] > 1.2) {
+      recommendations.push(`${MODE_TENSION_FLOOR[mode]} tension floor active — stay sharp`);
+    }
+    if (recommendations.length === 0) {
+      recommendations.push('Budget healthy — maintain current pace');
+    }
+
+    return Object.freeze({
+      score,
+      label,
+      budgetComponent,
+      holdComponent,
+      phaseComponent,
+      modeComponent,
+      pressureComponent,
+      recommendations: Object.freeze(recommendations),
+    });
+  }
+
+  /**
+   * Quick resilience score (scalar 0-1).
+   */
+  public quickScore(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+    totalBudgetMs: number,
+  ): number {
+    return this.score(snapshot, nextElapsedMs, totalBudgetMs).score;
+  }
+
+  private _scoreLabel(score: number): string {
+    if (score >= 0.8) return 'Resilient — you have strong budget headroom.';
+    if (score >= 0.6) return 'Moderate — watch your pace carefully.';
+    if (score >= 0.4) return 'Fragile — time pressure is mounting.';
+    if (score >= 0.2) return 'Vulnerable — you are close to the edge.';
+    return 'Critical — timeout is imminent.';
+  }
+}
+
+/* ============================================================================
+ * § 38 — TIMEOUT PULSE ANALYZER
+ * ============================================================================ */
+
+/**
+ * TimeoutPulseAnalyzer
+ *
+ * Detects spikes in budget consumption rate. A "pulse" is the change in
+ * budget utilization fraction between consecutive ticks.
+ *
+ * Rapid acceleration (consecutive high-delta pulses) signals that the run
+ * is burning through budget faster than expected — a critical early warning
+ * signal before the standard threshold system fires.
+ *
+ * Maintains a rolling window of recent pulses (max 20).
+ */
+export class TimeoutPulseAnalyzer {
+  private readonly pulses: TimeoutBudgetPulse[] = [];
+  private lastUtilizationFraction = 0;
+
+  /**
+   * Record a new utilization measurement and detect the pulse.
+   */
+  public record(
+    snapshot: RunStateSnapshot,
+    utilizationFraction: number,
+    nowMs: number,
+  ): TimeoutBudgetPulse {
+    const delta = Math.max(0, utilizationFraction - this.lastUtilizationFraction);
+    this.lastUtilizationFraction = utilizationFraction;
+
+    const prevPulse = this.pulses[this.pulses.length - 1];
+    const prevDelta = prevPulse?.deltaFraction ?? 0;
+    const acceleration = delta - prevDelta;
+    const isSpike = delta >= TIMEOUT_PULSE_SPIKE_THRESHOLD;
+    const tier = snapshot.pressure.tier;
+    const phase = snapshot.phase;
+
+    const pulse: TimeoutBudgetPulse = Object.freeze({
+      tick: snapshot.tick,
+      deltaFraction: delta,
+      acceleration,
+      phase,
+      tier,
+      isSpike,
+      recordedAtMs: nowMs,
+    });
+
+    this.pulses.push(pulse);
+    if (this.pulses.length > TIMEOUT_PULSE_MAX_HISTORY) {
+      this.pulses.shift();
+    }
+
+    return pulse;
+  }
+
+  /**
+   * Get the full pulse analysis summary.
+   */
+  public summarize(snapshot: RunStateSnapshot): TimeoutPulseAnalysisSummary {
+    if (this.pulses.length === 0) {
+      return this._emptyAnalysis(snapshot);
+    }
+
+    const recentPulses = [...this.pulses];
+    const deltas = recentPulses.map(p => p.deltaFraction);
+    const avgDelta = safeDivide(
+      deltas.reduce((a, b) => a + b, 0),
+      deltas.length,
+    );
+    const maxDelta = Math.max(...deltas);
+    const spikeCount = recentPulses.filter(p => p.isSpike).length;
+
+    // Acceleration trend: look at last 5 pulses
+    const recent5 = recentPulses.slice(-5);
+    const accelerations = recent5.map(p => p.acceleration);
+    const avgAccel = safeDivide(
+      accelerations.reduce((a, b) => a + b, 0),
+      accelerations.length,
+    );
+    const accelerationTrend: 'ACCELERATING' | 'STEADY' | 'DECELERATING' =
+      avgAccel > 0.005 ? 'ACCELERATING'
+      : avgAccel < -0.005 ? 'DECELERATING'
+      : 'STEADY';
+
+    // Projected exhaust tick: if current rate continues
+    const remaining = 1.0 - this.lastUtilizationFraction;
+    const projectedExhaustTick = avgDelta > 0
+      ? Math.ceil(snapshot.tick + safeDivide(remaining, avgDelta))
+      : null;
+
+    // Risk multiplier: spikes + acceleration amplify risk
+    const riskMultiplier = clampFraction(
+      1.0 + spikeCount * 0.1 + (avgAccel > 0 ? avgAccel * 5 : 0),
+    );
+
+    return Object.freeze({
+      recentPulses: Object.freeze(recentPulses),
+      avgDeltaFraction: avgDelta,
+      maxDeltaFraction: maxDelta,
+      spikeCount,
+      accelerationTrend,
+      projectedExhaustTick,
+      riskMultiplier,
+    });
+  }
+
+  /** Reset pulse history (for run restart). */
+  public reset(): void {
+    this.pulses.length = 0;
+    this.lastUtilizationFraction = 0;
+  }
+
+  /** Return current pulse history depth. */
+  public getHistoryDepth(): number {
+    return this.pulses.length;
+  }
+
+  private _emptyAnalysis(snapshot: RunStateSnapshot): TimeoutPulseAnalysisSummary {
+    return Object.freeze({
+      recentPulses: Object.freeze([]),
+      avgDeltaFraction: 0,
+      maxDeltaFraction: 0,
+      spikeCount: 0,
+      accelerationTrend: 'STEADY' as const,
+      projectedExhaustTick: null,
+      riskMultiplier: 1.0,
+    });
+    void snapshot; // available for future tick reference
+  }
+}
+
+/* ============================================================================
+ * § 39 — EXTENDED RunTimeoutGuard METHODS (SESSION + SIMULATION + PULSE)
+ * ============================================================================ */
+
+/**
+ * RunTimeoutGuardExtended
+ *
+ * Extension of RunTimeoutGuard with session analytics, budget simulation,
+ * resilience scoring, and pulse analysis wired in.
+ *
+ * Inherits from RunTimeoutGuard and adds the following surfaces:
+ * - sessionAnalytics: TimeoutSessionAnalytics
+ * - simulator: TimeoutBudgetSimulator
+ * - resilienceScorer: TimeoutResilienceScorer
+ * - pulseAnalyzer: TimeoutPulseAnalyzer
+ *
+ * Use RunTimeoutGuardExtended.resolveFullBundle() for a complete one-pass
+ * resolution that includes all sub-systems.
+ */
+export class RunTimeoutGuardExtended extends RunTimeoutGuard {
+  public readonly sessionAnalytics: TimeoutSessionAnalytics;
+  public readonly simulator: TimeoutBudgetSimulator;
+  public readonly resilienceScorer: TimeoutResilienceScorer;
+  public readonly pulseAnalyzer: TimeoutPulseAnalyzer;
+
+  public constructor(options: RunTimeoutGuardOptions = {}) {
+    super(options);
+    this.sessionAnalytics = new TimeoutSessionAnalytics();
+    this.simulator = new TimeoutBudgetSimulator();
+    this.resilienceScorer = new TimeoutResilienceScorer();
+    this.pulseAnalyzer = new TimeoutPulseAnalyzer();
+  }
+
+  /**
+   * Initialize the extended guard for a new run session.
+   */
+  public initSession(snapshot: RunStateSnapshot, nowMs: number): void {
+    this.sessionAnalytics.init(snapshot.runId, nowMs);
+    this.pulseAnalyzer.reset();
+    this.reset();
+  }
+
+  /**
+   * Full extended bundle resolution.
+   *
+   * Wraps resolveBundle() and adds:
+   * - Session analytics update
+   * - Budget simulation
+   * - Resilience scoring
+   * - Pulse analysis
+   */
+  public resolveFullBundle(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+    nowMs: number,
+  ): RunTimeoutGuardBundle & {
+    readonly simulation: TimeoutBudgetSimResult;
+    readonly resilience: TimeoutResilienceScore;
+    readonly pulse: TimeoutPulseAnalysisSummary;
+    readonly session: TimeoutSessionAnalyticsSnapshot;
+  } {
+    const totalBudgetMs = this.getTotalBudgetMs(snapshot);
+    const utilizationFraction = this.getUtilizationFraction(snapshot, nextElapsedMs);
+
+    // Core bundle
+    const bundle = this.resolveBundle(snapshot, nextElapsedMs, nowMs);
+
+    // Simulation
+    const simulation = this.simulator.simulate(snapshot, nextElapsedMs, totalBudgetMs);
+
+    // Resilience
+    const resilience = this.resilienceScorer.score(snapshot, nextElapsedMs, totalBudgetMs);
+
+    // Pulse
+    const pulse = this._recordAndAnalyzePulse(snapshot, utilizationFraction, nowMs);
+
+    // Session analytics update
+    this.sessionAnalytics.recordResolve(
+      bundle.resolution,
+      bundle.proximity,
+      bundle.alert,
+      snapshot,
+      nowMs,
+    );
+
+    if (bundle.chatResult !== null && bundle.chatResult.suppressedReason === null) {
+      this.sessionAnalytics.recordChatSignal();
+    }
+
+    if (bundle.phase.isAtPhaseBoundary) {
+      this.sessionAnalytics.recordPhaseTransition();
+    }
+
+    const session = this.sessionAnalytics.snapshot();
+
+    return Object.freeze({
+      ...bundle,
+      simulation,
+      resilience,
+      pulse,
+      session,
+    });
+  }
+
+  /**
+   * Compute the timeout probability from simulation.
+   * Used as an ML feature for downstream models.
+   */
+  public computeTimeoutProbability(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+  ): number {
+    return this.simulator.quickTimeoutProbability(
+      snapshot,
+      nextElapsedMs,
+      this.getTotalBudgetMs(snapshot),
+    );
+  }
+
+  /**
+   * Compute the resilience score (scalar 0-1).
+   */
+  public computeResilienceScore(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+  ): number {
+    return this.resilienceScorer.quickScore(
+      snapshot,
+      nextElapsedMs,
+      this.getTotalBudgetMs(snapshot),
+    );
+  }
+
+  /**
+   * Simulate forward trajectory and return projected exhaust tick.
+   */
+  public simulateTrajectory(
+    snapshot: RunStateSnapshot,
+    nextElapsedMs: number,
+    maxTicks = 100,
+  ): TimeoutBudgetSimResult {
+    return this.simulator.simulate(
+      snapshot,
+      nextElapsedMs,
+      this.getTotalBudgetMs(snapshot),
+      maxTicks,
+    );
+  }
+
+  /**
+   * Get the pulse analysis summary for the current session.
+   */
+  public getPulseSummary(snapshot: RunStateSnapshot): TimeoutPulseAnalysisSummary {
+    return this.pulseAnalyzer.summarize(snapshot);
+  }
+
+  /**
+   * Override reset to also clear sub-system state.
+   */
+  public override reset(): void {
+    super.reset();
+    this.pulseAnalyzer.reset();
+  }
+
+  private _recordAndAnalyzePulse(
+    snapshot: RunStateSnapshot,
+    utilizationFraction: number,
+    nowMs: number,
+  ): TimeoutPulseAnalysisSummary {
+    this.pulseAnalyzer.record(snapshot, utilizationFraction, nowMs);
+    return this.pulseAnalyzer.summarize(snapshot);
+  }
+}
+
+/* ============================================================================
+ * § 40 — ADDITIONAL FACTORY FUNCTIONS
+ * ============================================================================ */
+
+/**
+ * Create a RunTimeoutGuardExtended with all sub-systems wired.
+ * This is the preferred factory for orchestrators that need full depth.
+ */
+export function createRunTimeoutGuardExtended(
+  options?: RunTimeoutGuardOptions,
+): RunTimeoutGuardExtended {
+  return new RunTimeoutGuardExtended(options);
+}
+
+/**
+ * Create a silent RunTimeoutGuardExtended (no chat signals).
+ * Useful for replay validation.
+ */
+export function createRunTimeoutGuardExtendedSilent(): RunTimeoutGuardExtended {
+  return new RunTimeoutGuardExtended({ chatEnabled: false });
+}
+
+/**
+ * Simulate a budget trajectory from raw values (no snapshot needed).
+ * Pure standalone function.
+ */
+export function simulateTimeoutTrajectory(
+  elapsedMs: number,
+  totalBudgetMs: number,
+  tickDurationMs: number,
+  mode: ModeCode,
+  tier: PressureTier,
+  phase: RunPhase,
+  maxTicks = 100,
+): readonly TimeoutBudgetSimPoint[] {
+  const totalMs = Math.max(1, normalizeMs(totalBudgetMs));
+  const consumed = normalizeMs(elapsedMs);
+  const effectiveTickMs = Math.max(
+    100,
+    normalizeMs(tickDurationMs) || TIER_DURATIONS_MS[tier],
+  );
+
+  const points: TimeoutBudgetSimPoint[] = [];
+  let simElapsed = consumed;
+  let tick = 0;
+
+  const modeMultiplier = TIME_CONTRACT_MODE_TEMPO[mode];
+  const adjustedTickMs = Math.max(100, Math.floor(effectiveTickMs / modeMultiplier));
+
+  for (let step = 0; step < maxTicks; step++) {
+    simElapsed += adjustedTickMs;
+    tick++;
+    const simRemaining = Math.max(0, totalMs - simElapsed);
+    const utilizationFraction = clampFraction(safeDivide(simElapsed, totalMs));
+    const criticality = classifyUtilization(utilizationFraction);
+    const simPhase = resolvePhaseFromElapsedMs(simElapsed);
+    const proximityScore = clampFraction(
+      utilizationFraction * TIMEOUT_PHASE_URGENCY_AMPLIFIER[simPhase] * TIMEOUT_MODE_SENSITIVITY[mode],
+    );
+    const alertStage = classifyProximity(proximityScore);
+
+    points.push(Object.freeze({
+      tick,
+      elapsedMs: simElapsed,
+      remainingMs: simRemaining,
+      utilizationFraction,
+      criticality,
+      proximityScore,
+      alertStage,
+      phase: simPhase,
+    }));
+
+    if (simElapsed >= totalMs) break;
+  }
+
+  void phase; // original phase available for external use
+  void tier;  // original tier available for external use
+  return Object.freeze(points);
+}
+
+/**
+ * Compute resilience score from raw values (pure utility).
+ */
+export function computeRunTimeoutResilience(
+  remainingMs: number,
+  totalBudgetMs: number,
+  holdCharges: number,
+  holdEnabled: boolean,
+  phase: RunPhase,
+  mode: ModeCode,
+  tier: PressureTier,
+): number {
+  const totalMs = Math.max(1, normalizeMs(totalBudgetMs));
+  const remainingFraction = clampFraction(safeDivide(remainingMs, totalMs));
+
+  const budgetComponent = remainingFraction * 0.40;
+  const holdComponent = holdEnabled
+    ? clampFraction(safeDivide(holdCharges, 2)) * 0.20
+    : 0;
+
+  const phaseResilience: Record<RunPhase, number> = {
+    FOUNDATION: 1.0,
+    ESCALATION: 0.6,
+    SOVEREIGNTY: 0.3,
+  };
+  const phaseComponent = phaseResilience[phase] * 0.20;
+
+  const modeResilience: Record<ModeCode, number> = {
+    solo: 0.5,
+    pvp: 0.3,
+    coop: 0.8,
+    ghost: 0.1,
+  };
+  const modeComponent = modeResilience[mode] * 0.10;
+
+  const tierResilience: Record<PressureTier, number> = {
+    T0: 1.0,
+    T1: 0.75,
+    T2: 0.50,
+    T3: 0.25,
+    T4: 0.0,
+  };
+  const pressureComponent = tierResilience[tier] * 0.10;
+
+  return clampFraction(
+    budgetComponent + holdComponent + phaseComponent + modeComponent + pressureComponent,
+  );
+}
