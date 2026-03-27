@@ -879,7 +879,7 @@ class CollectorAdapterMLVectorBuilder {
     const escRisk        = computeEscalationRisk(score, trend?.velocity ?? 0, tier);
     const recProb        = computeRecoveryProbability(score, trend?.velocity ?? 0);
     const threatScore    = computeCollectorThreatScore(score, trend?.velocity ?? 0, tier, 'FOUNDATION');
-    const resilienceScore = computeCollectorResilienceScore(score, trend?.velocity ?? 0, tier);
+    const resilienceScore = computeCollectorResilienceScore(score, trend?.velocity ?? 0, reliefBalance);
 
     const positiveFeatureVector = this.buildPositiveFeatureVector(collection, weights);
     const reliefFeatureVector   = this.buildReliefFeatureVector(collection, weights);
@@ -1141,7 +1141,7 @@ class CollectorAdapterAnalytics {
     // Mode-adjusted stress and threat/resilience accumulation
     const modeStress = computeModeAdjustedStressIndex(collection, 'solo');
     const threat     = computeCollectorThreatScore(collection.score, velocity, tier, 'FOUNDATION');
-    const resilience = computeCollectorResilienceScore(collection.score, velocity, tier);
+    const resilience = computeCollectorResilienceScore(collection.score, velocity, computeReliefBalance(collection));
 
     this.cumulativeThreatScore     += threat;
     this.cumulativeResilienceScore += resilience;
@@ -1835,7 +1835,7 @@ export class CollectorSignalAdapter {
     const stressIndex    = computeStressIndex(collection);
     const reliefBalance  = computeReliefBalance(collection);
     const threatScore    = computeCollectorThreatScore(score, trend.velocity, tier, snapshot.phase ?? 'FOUNDATION');
-    const resilienceScore = computeCollectorResilienceScore(score, trend.velocity, tier);
+    const resilienceScore = computeCollectorResilienceScore(score, trend.velocity, reliefBalance);
 
     const riskScore: Score01    = clamp01(adapterMLVec.riskScore) as Score01;
     const percentScore: Score100 = clamp100(scoreToPercentage(score)) as Score100;
