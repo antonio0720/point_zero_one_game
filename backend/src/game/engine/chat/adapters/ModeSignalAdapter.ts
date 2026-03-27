@@ -460,11 +460,11 @@ export class ModeSignalRiskScorer {
     const shieldIntegrity = computeShieldIntegrityRatio(shieldLayers);
     const shieldRisk = 1 - shieldIntegrity;
 
-    const activeBots = snapshot.battle.bots.filter((b) => b.state === 'STALKING' || b.state === 'ATTACKING');
+    const activeBots = snapshot.battle.bots.filter((b) => b.state === 'TARGETING' || b.state === 'ATTACKING');
     const botThreat = Math.min(
       1,
       computeAggregateBotThreat(
-        activeBots.map((b) => ({ botId: b.botId as HaterBotId, state: b.state as BotState })),
+        activeBots.map((b) => ({ id: b.botId as HaterBotId, state: b.state as BotState })),
       ) / 10,
     );
 
@@ -527,7 +527,7 @@ export class ModeSignalChannelRouter {
 export class ModeSignalUxLabelGenerator {
   public generate(snapshot: RunStateSnapshot, kind: ModeSignalKind): string {
     const modeLabel = this._modeLabel(snapshot.mode);
-    const pressureLabel = getPressureTierUrgencyLabel(snapshot.pressure.tier);
+    const pressureLabel = getPressureTierUrgencyLabel(snapshot);
 
     switch (kind) {
       case 'MODE_CONFIGURED':
@@ -1325,7 +1325,7 @@ void (function _verifyAllImportsUsed(): void {
   void computeShieldIntegrityRatio([{ id: 'L1' as ShieldLayerId, current: 50, max: 50 }]);
   void computeShieldLayerVulnerability('L1', 50, 50);
   void estimateShieldRegenPerTick('L1', 50);
-  void scoreCascadeChainHealth({ chainId: '__c__', triggerCardId: '__t__', startTick: 0, currentTick: 0, links: [], broken: false, completed: false, completedAtTick: null });
+  void scoreCascadeChainHealth({ chainId: '__c__', templateId: '__t__', trigger: '__t__', positive: false, status: 'ACTIVE', createdAtTick: 0, links: [], recoveryTags: [] });
   // RunStateSnapshot utilities (referenced in class bodies above — verified here too)
   void getNormalizedPressureTier;
   void computeSnapshotCompositeRisk;
