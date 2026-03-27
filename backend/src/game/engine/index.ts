@@ -335,6 +335,38 @@ export * as Time from './time';
  *   //             Zero.analyzeErrors(snap)
  *   //             Zero.buildDiagnosticsRunSummary(snap)
  *
+ * OrchestratorHealthReport entry points (all under Zero.*):
+ *   const bundle = Zero.createOrchestratorHealthReportWithAnalytics(deps);
+ *   const snap   = bundle.captureAndRecord();         // snapshot + trend + session
+ *   const result = bundle.captureAndInspect();        // full export bundle
+ *   const mlVec  = bundle.extractMLVector();          // 32-dim (7 engines × health features)
+ *   const tensor = bundle.buildDLTensor();            // 7×8 (engine × feature matrix)
+ *   const signal = bundle.buildChatSignal();          // OrchestratorHealthChatSignal
+ *   const trend  = bundle.getTrend();                 // OrchestratorHealthTrendSnapshot
+ *   const report = bundle.getSessionReport();         // OrchestratorHealthSessionReport
+ *   const annot  = bundle.buildAnnotations();         // OrchestratorHealthAnnotationBundle
+ *   const runSum = bundle.buildRunSummary();          // OrchestratorHealthRunSummary
+ *   const full   = bundle.exportBundle();             // OrchestratorHealthExportBundle
+ *   // Singleton: Zero.ZERO_DEFAULT_HEALTH_CHAT_SIGNAL
+ *   // Constants: Zero.HEALTH_ML_FEATURE_LABELS (32), Zero.HEALTH_DL_ENGINE_ORDER (7)
+ *   //            Zero.HEALTH_STATUS_NUMERIC_SCORE, Zero.HEALTH_STATUS_DL_ENCODING
+ *   //            Zero.HEALTH_STATUS_URGENCY_WEIGHT, Zero.HEALTH_STATUS_SCORE_PENALTY
+ *   // Utilities: Zero.extractHealthMLVector(snap)
+ *   //            Zero.buildHealthDLTensor(snap, nowMs)
+ *   //            Zero.buildHealthAnnotations(snap)
+ *   //            Zero.validateHealthMLVector(vec)
+ *   //            Zero.validateHealthDLTensor(tensor)
+ *   //            Zero.computeHealthMLSimilarity(a, b)
+ *   //            Zero.getTopUrgentHealthFeatures(vec, topN)
+ *   //            Zero.flattenHealthDLTensor(tensor)
+ *   //            Zero.buildHealthMLNamedMap(vec)
+ *   //            Zero.extractHealthDLColumn(tensor, colIndex)
+ *   //            Zero.getMostUrgentHealthEngine(tensor)
+ *   //            Zero.scoreEngineHealth(entry)
+ *   //            Zero.classifyEngineStatusSeverity(status)
+ *   //            Zero.isTerminalEngineStatus(status)
+ *   //            Zero.isImpairedEngineStatus(status)
+ *
  * Usage:
  *   import { Zero } from '../../engine';
  *   const engine = Zero.createZeroEngine();

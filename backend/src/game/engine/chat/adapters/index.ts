@@ -4263,6 +4263,25 @@ export {
 } from './OrchestratorDiagnosticsSignalAdapter';
 
 // ============================================================================
+// MARK: OrchestratorHealthSignalAdapter — Engine 0 health report → LIVEOPS
+// ============================================================================
+
+export {
+  OrchestratorHealthSignalAdapter,
+  ORCHESTRATOR_HEALTH_DEFAULT_ADAPTER,
+  ORCHESTRATOR_HEALTH_STRICT_ADAPTER,
+  ORCHESTRATOR_HEALTH_VERBOSE_ADAPTER,
+  type HealthSignalCompat,
+  type HealthTelemetryCompat,
+  type HealthMLVectorCompat,
+  type HealthTrendCompat,
+  type HealthSessionCompat,
+  type HealthDLTensorCompat,
+  type HealthAnnotationCompat,
+  type OrchestratorHealthAdapterMode,
+} from './OrchestratorHealthSignalAdapter';
+
+// ============================================================================
 // MARK: Final default export
 // ============================================================================
 
