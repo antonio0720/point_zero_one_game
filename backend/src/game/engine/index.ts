@@ -39,6 +39,7 @@ export * as TimingValidator from './timing_validator';
 export * as HeadToHeadMode from '../modes/head_to_head_mode';
 export * as TeamUpMode from '../modes/team_up_mode';
 export * as ChaseALegendMode from '../modes/chase_a_legend_mode';
+export * as HouseholdMode from '../modes/household_mode';
 
 /**
  * Cards engine sub-system — compiler, executor, legality, registry,
