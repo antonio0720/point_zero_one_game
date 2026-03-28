@@ -4164,9 +4164,10 @@ export function getHouseholdRarityDropRates() {
  * Get DECK_TYPE_PROFILES for all Household-legal decks.
  */
 export function getHouseholdDeckTypeProfiles(): Record<string, ReturnType<typeof getDeckTypeProfile>> {
+  const legalDecks = CARD_LEGALITY_MATRIX[HOUSEHOLD_BASE_MODE];
   const result: Record<string, ReturnType<typeof getDeckTypeProfile>> = {};
-  for (const deck of CARD_LEGALITY_MATRIX[HOUSEHOLD_BASE_MODE]) {
-    result[deck] = getDeckTypeProfile(deck);
+  for (const deck of legalDecks) {
+    result[deck] = DECK_TYPE_PROFILES[deck];
   }
   return result;
 }
