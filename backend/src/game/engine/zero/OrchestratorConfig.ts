@@ -315,7 +315,15 @@ export const ZERO_REQUIRED_ENGINE_DESCRIPTORS: readonly ZeroRequiredEngineDescri
   }),
 ]);
 
-export const ZERO_CANONICAL_TICK_SEQUENCE: readonly TickStep[] = TICK_SEQUENCE;
+/**
+ * ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE
+ *
+ * The canonical 13-step tick sequence as seen from the OrchestratorConfig layer.
+ * Named distinctly from ZERO_CANONICAL_TICK_SEQUENCE (zero.types) to avoid
+ * TS2308 barrel collision — both carry identical values but separate ownership.
+ * Consumers that only need the sequence should import from zero.types.
+ */
+export const ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE: readonly TickStep[] = TICK_SEQUENCE;
 
 export const ZERO_TICK_STEP_DESCRIPTOR_MAP: Readonly<Record<TickStep, TickStepDescriptor>> =
   TICK_STEP_DESCRIPTORS;
@@ -631,14 +639,16 @@ function createBaseStepPolicy(step: TickStep): OrchestratorStepPolicy {
   const isFlush = step === 'STEP_13_FLUSH';
   const isModePost = step === 'STEP_08_MODE_POST';
 
+  // Spread DEFAULT_STEP_POLICY as the base layer, then overlay per-step overrides.
+  // This ensures all defaults are applied uniformly and DEFAULT_STEP_POLICY remains
+  // the single source of truth for baseline step behavior.
   return Object.freeze({
-    enabled: true,
+    ...DEFAULT_STEP_POLICY,
+    owner,
     fatalOnError: isSeal,
     continueOnError: !isSeal,
-    owner,
     sealEligible: !isFlush,
     collectSignals: !isFlush,
-    collectDiagnostics: true,
     snapshotMutationExpected: !isTelemetry,
     runModeHooksBefore: isPrepare,
     runModeHooksAfter: isModePost || isOutcomeGate,
@@ -963,7 +973,7 @@ function createDefaultModePolicy(mode: ModeCode): OrchestratorModePolicy {
         mode,
         diagnostics: Object.freeze({
           enableTracePublishing: true,
-          retainLastResolvedConfigs: 64,
+          retainResolvedConfigs: 64,
         }),
         events: Object.freeze({
           retainLastEventSealSnapshots: 96,
@@ -2053,11 +2063,25 @@ export function createIntegrationTestOrchestratorConfig(
 // step lookup helpers
 // ────────────────────────────────────────────────────────────────────────────────
 
-export function getStepDescriptor(step: TickStep): TickStepDescriptor {
+/**
+ * getOrchestratorStepDescriptor
+ *
+ * Returns the canonical TickStepDescriptor for a given tick step.
+ * Named distinctly from getStepDescriptor (TickPlan.ts) to prevent TS2308
+ * barrel collision — semantically identical but owned by OrchestratorConfig.
+ */
+export function getOrchestratorStepDescriptor(step: TickStep): TickStepDescriptor {
   return TICK_STEP_DESCRIPTORS[step];
 }
 
-export function getStepOwner(step: TickStep): StepRuntimeOwner {
+/**
+ * getOrchestratorStepOwner
+ *
+ * Returns the StepRuntimeOwner responsible for a given tick step in Engine 0.
+ * Named distinctly from getStepOwner (TickPlan.ts) to prevent TS2308
+ * barrel collision — semantically identical but owned by OrchestratorConfig.
+ */
+export function getOrchestratorStepOwner(step: TickStep): StepRuntimeOwner {
   return ZERO_STEP_OWNER_MAP[step];
 }
 
@@ -2106,7 +2130,15 @@ export const ZERO_DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig =
 export const ZERO_DEFAULT_ORCHESTRATOR_SUMMARY: OrchestratorConfigSummary =
   summarizeOrchestratorConfig(ZERO_DEFAULT_ORCHESTRATOR_CONFIG);
 
-export const ZERO_DEFAULT_TICK_PLAN: TickPlanSnapshot =
+/**
+ * ZERO_ORCHESTRATOR_DEFAULT_TICK_PLAN
+ *
+ * The TickPlanSnapshot derived from the default OrchestratorConfig.
+ * Named distinctly from ZERO_DEFAULT_TICK_PLAN (TickPlan.ts) to prevent
+ * TS2308 barrel collision. This plan is computed from policy config;
+ * the TickPlan.ts version is the canonical structural plan.
+ */
+export const ZERO_ORCHESTRATOR_DEFAULT_TICK_PLAN: TickPlanSnapshot =
   buildTickPlanFromConfig(ZERO_DEFAULT_ORCHESTRATOR_CONFIG);
 
 export const ZERO_DEFAULT_ORCHESTRATOR_FINGERPRINT: string =
@@ -2133,3 +2165,1341 @@ export const ZERO_TOURNAMENT_ORCHESTRATOR_CONFIG: OrchestratorConfig =
 
 export const ZERO_INTEGRATION_TEST_ORCHESTRATOR_CONFIG: OrchestratorConfig =
   createIntegrationTestOrchestratorConfig();
+
+// ────────────────────────────────────────────────────────────────────────────────
+// ML VECTOR EXTRACTION — 32-dimensional feature representation
+// ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * OrchestratorConfigMLVector
+ *
+ * 32-dimensional ML feature vector derived from a resolved OrchestratorConfig.
+ * All dimensions are in [0, 1] (normalized). Boolean policy fields are 0 or 1.
+ * Numeric fields are clamped and normalized against their canonical range.
+ *
+ * Dimension layout (4 groups × 8 dims):
+ *   [0..7]   Safety policy features
+ *   [8..15]  Event + Diagnostics policy features
+ *   [16..23] Lifecycle + Step plan features
+ *   [24..31] Profile + Mode identity features
+ */
+export interface OrchestratorConfigMLVector {
+  // Safety policy (dims 0–7)
+  readonly maxConsecutiveTickErrors01: number;     // 0: 1/20 … 1: 20/20
+  readonly maxAllowedSkippedSteps01: number;       // 0: 0/13 … 1: 13/13
+  readonly failClosedOnRegistryGap: 0 | 1;
+  readonly abortRunOnFatalSealError: 0 | 1;
+  readonly quarantineOnFlushError: 0 | 1;
+  readonly quarantineOnSealMismatch: 0 | 1;
+  readonly failClosedOnInvalidProfile: 0 | 1;
+  readonly preserveTerminalSnapshotOnAbort: 0 | 1;
+
+  // Event + Diagnostics policy (dims 8–15)
+  readonly emitRunStartedImmediately: 0 | 1;
+  readonly sealEventsBeforeFlush: 0 | 1;
+  readonly flushAtFinalStepOnly: 0 | 1;
+  readonly retainLastEventSealSnapshots01: number; // normalized against 256
+  readonly enableTracePublishing: 0 | 1;
+  readonly enableHealthSnapshots: 0 | 1;
+  readonly retainLastTickSummaries01: number;      // normalized against 300
+  readonly retainLastErrors01: number;             // normalized against 300
+
+  // Lifecycle + Step plan (dims 16–23)
+  readonly allowPlayCardOnlyWhenActive: 0 | 1;
+  readonly autoFinalizeProofOnTerminalOutcome: 0 | 1;
+  readonly allowResetFromEnded: 0 | 1;
+  readonly retainTickHistoryAcrossRuns: 0 | 1;
+  readonly enabledStepCount01: number;             // normalized against 13
+  readonly disabledStepCount01: number;            // normalized against 13
+  readonly sealStepEnabled: 0 | 1;
+  readonly flushStepEnabled: 0 | 1;
+
+  // Profile + Mode identity (dims 24–31)
+  readonly profileIsDefault: 0 | 1;
+  readonly profileIsProduction: 0 | 1;
+  readonly profileIsTournament: 0 | 1;
+  readonly profileIsDebugOrReplay: 0 | 1;
+  readonly modeIsSolo: 0 | 1;
+  readonly modeIsPvp: 0 | 1;
+  readonly modeIsCoop: 0 | 1;
+  readonly modeIsGhost: 0 | 1;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function boolToFeature(value: boolean): 0 | 1 {
+  return value ? 1 : 0;
+}
+
+/**
+ * extractOrchestratorConfigMLVector
+ *
+ * Extracts the 32-dimensional ML feature vector from a ResolvedOrchestratorConfig.
+ * All fields are normalized to [0, 1]. The vector is deterministic for identical inputs.
+ *
+ * Usage:
+ *   const resolved = resolveOrchestratorConfig({ profileId: 'production', mode: 'pvp' });
+ *   const mlVec = extractOrchestratorConfigMLVector(resolved);
+ *   // mlVec.profileIsProduction === 1, mlVec.modeIsPvp === 1
+ */
+export function extractOrchestratorConfigMLVector(
+  resolved: ResolvedOrchestratorConfig,
+): OrchestratorConfigMLVector {
+  const { safety, events, diagnostics, lifecycle, stepConfig } = resolved;
+
+  const enabledStepCount = ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.filter(
+    (s) => stepConfig[s].enabled,
+  ).length;
+  const disabledStepCount = ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.length - enabledStepCount;
+
+  return Object.freeze({
+    // Safety policy
+    maxConsecutiveTickErrors01: clamp01(safety.maxConsecutiveTickErrors / 20),
+    maxAllowedSkippedSteps01: clamp01(
+      safety.maxAllowedSkippedStepsPerTick / ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.length,
+    ),
+    failClosedOnRegistryGap: boolToFeature(safety.failClosedOnRegistryGap),
+    abortRunOnFatalSealError: boolToFeature(safety.abortRunOnFatalSealError),
+    quarantineOnFlushError: boolToFeature(safety.quarantineOnFlushError),
+    quarantineOnSealMismatch: boolToFeature(safety.quarantineOnSealMismatch),
+    failClosedOnInvalidProfile: boolToFeature(safety.failClosedOnInvalidProfile),
+    preserveTerminalSnapshotOnAbort: boolToFeature(safety.preserveTerminalSnapshotOnAbort),
+
+    // Event + Diagnostics policy
+    emitRunStartedImmediately: boolToFeature(events.emitRunStartedImmediately),
+    sealEventsBeforeFlush: boolToFeature(events.sealEventsBeforeFlush),
+    flushAtFinalStepOnly: boolToFeature(events.flushAtFinalStepOnly),
+    retainLastEventSealSnapshots01: clamp01(events.retainLastEventSealSnapshots / 256),
+    enableTracePublishing: boolToFeature(diagnostics.enableTracePublishing),
+    enableHealthSnapshots: boolToFeature(diagnostics.enableHealthSnapshots),
+    retainLastTickSummaries01: clamp01(diagnostics.retainLastTickSummaries / 300),
+    retainLastErrors01: clamp01(diagnostics.retainLastErrors / 300),
+
+    // Lifecycle + Step plan
+    allowPlayCardOnlyWhenActive: boolToFeature(lifecycle.allowPlayCardOnlyWhenActive),
+    autoFinalizeProofOnTerminalOutcome: boolToFeature(lifecycle.autoFinalizeProofOnTerminalOutcome),
+    allowResetFromEnded: boolToFeature(lifecycle.allowResetFromEnded),
+    retainTickHistoryAcrossRuns: boolToFeature(lifecycle.retainTickHistoryAcrossRuns),
+    enabledStepCount01: clamp01(enabledStepCount / ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.length),
+    disabledStepCount01: clamp01(disabledStepCount / ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.length),
+    sealStepEnabled: boolToFeature(stepConfig.STEP_12_EVENT_SEAL.enabled),
+    flushStepEnabled: boolToFeature(stepConfig.STEP_13_FLUSH.enabled),
+
+    // Profile + Mode identity
+    profileIsDefault: boolToFeature(resolved.resolvedProfileId === 'default'),
+    profileIsProduction: boolToFeature(resolved.resolvedProfileId === 'production'),
+    profileIsTournament: boolToFeature(resolved.resolvedProfileId === 'tournament'),
+    profileIsDebugOrReplay: boolToFeature(
+      resolved.resolvedProfileId === 'debug' || resolved.resolvedProfileId === 'replay',
+    ),
+    modeIsSolo: boolToFeature(resolved.resolvedMode === 'solo'),
+    modeIsPvp: boolToFeature(resolved.resolvedMode === 'pvp'),
+    modeIsCoop: boolToFeature(resolved.resolvedMode === 'coop'),
+    modeIsGhost: boolToFeature(resolved.resolvedMode === 'ghost'),
+  });
+}
+
+/**
+ * mlVectorToArray
+ *
+ * Converts an OrchestratorConfigMLVector to a flat 32-element number array.
+ * The canonical dimension order matches the interface field declaration order.
+ */
+export function mlVectorToArray(vec: OrchestratorConfigMLVector): readonly number[] {
+  return Object.freeze([
+    vec.maxConsecutiveTickErrors01,
+    vec.maxAllowedSkippedSteps01,
+    vec.failClosedOnRegistryGap,
+    vec.abortRunOnFatalSealError,
+    vec.quarantineOnFlushError,
+    vec.quarantineOnSealMismatch,
+    vec.failClosedOnInvalidProfile,
+    vec.preserveTerminalSnapshotOnAbort,
+
+    vec.emitRunStartedImmediately,
+    vec.sealEventsBeforeFlush,
+    vec.flushAtFinalStepOnly,
+    vec.retainLastEventSealSnapshots01,
+    vec.enableTracePublishing,
+    vec.enableHealthSnapshots,
+    vec.retainLastTickSummaries01,
+    vec.retainLastErrors01,
+
+    vec.allowPlayCardOnlyWhenActive,
+    vec.autoFinalizeProofOnTerminalOutcome,
+    vec.allowResetFromEnded,
+    vec.retainTickHistoryAcrossRuns,
+    vec.enabledStepCount01,
+    vec.disabledStepCount01,
+    vec.sealStepEnabled,
+    vec.flushStepEnabled,
+
+    vec.profileIsDefault,
+    vec.profileIsProduction,
+    vec.profileIsTournament,
+    vec.profileIsDebugOrReplay,
+    vec.modeIsSolo,
+    vec.modeIsPvp,
+    vec.modeIsCoop,
+    vec.modeIsGhost,
+  ]);
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// DL TENSOR CONSTRUCTION — 13×10 step-level feature matrix
+// ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * OrchestratorConfigDLTensor
+ *
+ * Deep-learning tensor: 13 tick steps × 10 per-step features.
+ * Row i corresponds to TICK_SEQUENCE[i]. Columns:
+ *   [0] enabled
+ *   [1] fatalOnError
+ *   [2] continueOnError
+ *   [3] sealEligible
+ *   [4] collectSignals
+ *   [5] collectDiagnostics
+ *   [6] snapshotMutationExpected
+ *   [7] runModeHooksBefore
+ *   [8] runModeHooksAfter
+ *   [9] ownerEncoded (system=0 time=1 pressure=2 tension=3 battle=4 shield=5 cascade=6 sovereignty=7 mode=8 telemetry=9, normalized /9)
+ */
+export type OrchestratorConfigDLTensor = readonly (readonly number[])[];
+
+const STEP_OWNER_ENCODING: Readonly<Record<StepRuntimeOwner, number>> = Object.freeze({
+  system: 0,
+  time: 1,
+  pressure: 2,
+  tension: 3,
+  battle: 4,
+  shield: 5,
+  cascade: 6,
+  sovereignty: 7,
+  mode: 8,
+  telemetry: 9,
+  unknown: 9,
+});
+
+/**
+ * buildOrchestratorConfigDLTensor
+ *
+ * Builds a 13×10 DL tensor from the step-level policies in a resolved config.
+ * Each row is one tick step; each column is a binary or normalized feature.
+ *
+ * Usage:
+ *   const resolved = resolveOrchestratorConfig({ profileId: 'tournament' });
+ *   const tensor = buildOrchestratorConfigDLTensor(resolved);
+ *   // tensor[0] → STEP_01_PREPARE feature row
+ *   // tensor[11] → STEP_12_EVENT_SEAL feature row
+ */
+export function buildOrchestratorConfigDLTensor(
+  resolved: ResolvedOrchestratorConfig,
+): OrchestratorConfigDLTensor {
+  const rows: (readonly number[])[] = [];
+
+  for (const step of ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE) {
+    const policy = resolved.stepConfig[step];
+    const ownerCode = STEP_OWNER_ENCODING[policy.owner] ?? 9;
+
+    rows.push(Object.freeze([
+      boolToFeature(policy.enabled),
+      boolToFeature(policy.fatalOnError),
+      boolToFeature(policy.continueOnError),
+      boolToFeature(policy.sealEligible),
+      boolToFeature(policy.collectSignals),
+      boolToFeature(policy.collectDiagnostics),
+      boolToFeature(policy.snapshotMutationExpected),
+      boolToFeature(policy.runModeHooksBefore),
+      boolToFeature(policy.runModeHooksAfter),
+      clamp01(ownerCode / 9),
+    ]));
+  }
+
+  return Object.freeze(rows);
+}
+
+/**
+ * dlTensorToFlatArray
+ *
+ * Flattens the 13×10 DL tensor to a 130-element array in row-major order.
+ * Useful for feeding into ML inference pipelines that expect flat input.
+ */
+export function dlTensorToFlatArray(tensor: OrchestratorConfigDLTensor): readonly number[] {
+  const flat: number[] = [];
+  for (const row of tensor) {
+    for (const value of row) {
+      flat.push(value);
+    }
+  }
+  return Object.freeze(flat);
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// CONFIG DIFF UTILITY — structural comparison between two resolved configs
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface OrchestratorConfigDiffEntry {
+  readonly path: string;
+  readonly label: string;
+  readonly fromValue: unknown;
+  readonly toValue: unknown;
+  readonly category: 'safety' | 'events' | 'diagnostics' | 'lifecycle' | 'step' | 'profile' | 'mode';
+  readonly significant: boolean;
+}
+
+export interface OrchestratorConfigDiff {
+  readonly fromFingerprint: string;
+  readonly toFingerprint: string;
+  readonly changed: boolean;
+  readonly entries: readonly OrchestratorConfigDiffEntry[];
+  readonly significantChanges: number;
+  readonly safetyChanges: number;
+  readonly stepChanges: number;
+}
+
+function diffEntry(
+  path: string,
+  label: string,
+  a: unknown,
+  b: unknown,
+  category: OrchestratorConfigDiffEntry['category'],
+  significant: boolean,
+): OrchestratorConfigDiffEntry | null {
+  if (a === b) {
+    return null;
+  }
+  return Object.freeze({ path, label, fromValue: a, toValue: b, category, significant });
+}
+
+/**
+ * diffResolvedOrchestratorConfigs
+ *
+ * Compares two resolved configs and produces a structured diff.
+ * Significant changes are those that affect safety, sealing, or step enable/disable.
+ *
+ * Usage:
+ *   const a = resolveOrchestratorConfig({ profileId: 'default' });
+ *   const b = resolveOrchestratorConfig({ profileId: 'tournament' });
+ *   const diff = diffResolvedOrchestratorConfigs(a, b);
+ *   console.log(diff.significantChanges, diff.entries.length);
+ */
+export function diffResolvedOrchestratorConfigs(
+  from: ResolvedOrchestratorConfig,
+  to: ResolvedOrchestratorConfig,
+): OrchestratorConfigDiff {
+  const entries: OrchestratorConfigDiffEntry[] = [];
+
+  function push(entry: OrchestratorConfigDiffEntry | null): void {
+    if (entry !== null) {
+      entries.push(entry);
+    }
+  }
+
+  // Safety policy diffs
+  push(diffEntry('safety.maxConsecutiveTickErrors', 'Max consecutive tick errors',
+    from.safety.maxConsecutiveTickErrors, to.safety.maxConsecutiveTickErrors, 'safety', true));
+  push(diffEntry('safety.failClosedOnRegistryGap', 'Fail-closed on registry gap',
+    from.safety.failClosedOnRegistryGap, to.safety.failClosedOnRegistryGap, 'safety', true));
+  push(diffEntry('safety.abortRunOnFatalSealError', 'Abort on fatal seal error',
+    from.safety.abortRunOnFatalSealError, to.safety.abortRunOnFatalSealError, 'safety', true));
+  push(diffEntry('safety.quarantineOnFlushError', 'Quarantine on flush error',
+    from.safety.quarantineOnFlushError, to.safety.quarantineOnFlushError, 'safety', true));
+  push(diffEntry('safety.quarantineOnSealMismatch', 'Quarantine on seal mismatch',
+    from.safety.quarantineOnSealMismatch, to.safety.quarantineOnSealMismatch, 'safety', true));
+  push(diffEntry('safety.maxAllowedSkippedStepsPerTick', 'Max skipped steps per tick',
+    from.safety.maxAllowedSkippedStepsPerTick, to.safety.maxAllowedSkippedStepsPerTick, 'safety', true));
+  push(diffEntry('safety.failClosedOnInvalidProfile', 'Fail-closed on invalid profile',
+    from.safety.failClosedOnInvalidProfile, to.safety.failClosedOnInvalidProfile, 'safety', false));
+  push(diffEntry('safety.preserveTerminalSnapshotOnAbort', 'Preserve terminal snapshot on abort',
+    from.safety.preserveTerminalSnapshotOnAbort, to.safety.preserveTerminalSnapshotOnAbort, 'safety', false));
+
+  // Event policy diffs
+  push(diffEntry('events.sealEventsBeforeFlush', 'Seal events before flush',
+    from.events.sealEventsBeforeFlush, to.events.sealEventsBeforeFlush, 'events', true));
+  push(diffEntry('events.flushAtFinalStepOnly', 'Flush at final step only',
+    from.events.flushAtFinalStepOnly, to.events.flushAtFinalStepOnly, 'events', true));
+  push(diffEntry('events.retainLastEventSealSnapshots', 'Retained event seal snapshots',
+    from.events.retainLastEventSealSnapshots, to.events.retainLastEventSealSnapshots, 'events', false));
+  push(diffEntry('events.retainLastFlushedEventBatches', 'Retained flushed event batches',
+    from.events.retainLastFlushedEventBatches, to.events.retainLastFlushedEventBatches, 'events', false));
+  push(diffEntry('events.emitRunStartedImmediately', 'Emit run-started immediately',
+    from.events.emitRunStartedImmediately, to.events.emitRunStartedImmediately, 'events', false));
+  push(diffEntry('events.emitLifecycleCheckpointEvents', 'Emit lifecycle checkpoint events',
+    from.events.emitLifecycleCheckpointEvents, to.events.emitLifecycleCheckpointEvents, 'events', false));
+
+  // Diagnostics diffs
+  push(diffEntry('diagnostics.enableTracePublishing', 'Trace publishing enabled',
+    from.diagnostics.enableTracePublishing, to.diagnostics.enableTracePublishing, 'diagnostics', false));
+  push(diffEntry('diagnostics.enableHealthSnapshots', 'Health snapshots enabled',
+    from.diagnostics.enableHealthSnapshots, to.diagnostics.enableHealthSnapshots, 'diagnostics', false));
+  push(diffEntry('diagnostics.retainLastTickSummaries', 'Retained tick summaries',
+    from.diagnostics.retainLastTickSummaries, to.diagnostics.retainLastTickSummaries, 'diagnostics', false));
+  push(diffEntry('diagnostics.retainLastErrors', 'Retained errors',
+    from.diagnostics.retainLastErrors, to.diagnostics.retainLastErrors, 'diagnostics', false));
+
+  // Profile + mode diffs
+  if (from.resolvedProfileId !== to.resolvedProfileId) {
+    entries.push(Object.freeze({
+      path: 'resolvedProfileId',
+      label: 'Resolved profile',
+      fromValue: from.resolvedProfileId,
+      toValue: to.resolvedProfileId,
+      category: 'profile',
+      significant: true,
+    }));
+  }
+  if (from.resolvedMode !== to.resolvedMode) {
+    entries.push(Object.freeze({
+      path: 'resolvedMode',
+      label: 'Resolved mode',
+      fromValue: from.resolvedMode,
+      toValue: to.resolvedMode,
+      category: 'mode',
+      significant: false,
+    }));
+  }
+
+  // Step enable/disable diffs
+  for (const step of ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE) {
+    const fromEnabled = from.stepConfig[step].enabled;
+    const toEnabled = to.stepConfig[step].enabled;
+    if (fromEnabled !== toEnabled) {
+      entries.push(Object.freeze({
+        path: `stepConfig.${step}.enabled`,
+        label: `Step ${step} enabled`,
+        fromValue: fromEnabled,
+        toValue: toEnabled,
+        category: 'step',
+        significant: step === 'STEP_12_EVENT_SEAL' || step === 'STEP_13_FLUSH',
+      }));
+    }
+    const fromFatal = from.stepConfig[step].fatalOnError;
+    const toFatal = to.stepConfig[step].fatalOnError;
+    if (fromFatal !== toFatal) {
+      entries.push(Object.freeze({
+        path: `stepConfig.${step}.fatalOnError`,
+        label: `Step ${step} fatal-on-error`,
+        fromValue: fromFatal,
+        toValue: toFatal,
+        category: 'step',
+        significant: true,
+      }));
+    }
+  }
+
+  const significantChanges = entries.filter((e) => e.significant).length;
+  const safetyChanges = entries.filter((e) => e.category === 'safety').length;
+  const stepChanges = entries.filter((e) => e.category === 'step').length;
+
+  return Object.freeze({
+    fromFingerprint: from.fingerprint,
+    toFingerprint: to.fingerprint,
+    changed: entries.length > 0,
+    entries: Object.freeze(entries),
+    significantChanges,
+    safetyChanges,
+    stepChanges,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// CHAT SIGNAL — OrchestratorConfig chat bridge for the LIVEOPS lane
+// ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * OrchestratorConfigSafetyLevel
+ *
+ * Qualitative safety posture inferred from resolved safety policy:
+ * - strict: all fail-closed flags set, low error tolerance
+ * - standard: balanced defaults
+ * - permissive: elevated error tolerance or quarantine relaxed
+ */
+export type OrchestratorConfigSafetyLevel = 'strict' | 'standard' | 'permissive';
+
+/**
+ * OrchestratorConfigChatSignal
+ *
+ * Chat-lane signal emitted when an OrchestratorConfig is resolved for a run.
+ * Consumed by the OrchestratorConfigSignalAdapter to build a ChatSignalEnvelope
+ * routed to the LIVEOPS lane. Carries only the policy-relevant summary — raw
+ * policy objects are never sent to the chat lane to avoid payload bloat.
+ */
+export interface OrchestratorConfigChatSignal {
+  readonly kind: 'orchestrator-config.resolved';
+  readonly profileId: OrchestratorProfileId;
+  readonly mode: ModeCode | null;
+  readonly lifecycleState: string | null;
+  readonly fingerprint: string;
+  readonly enabledStepCount: number;
+  readonly disabledStepCount: number;
+  readonly totalStepCount: number;
+  readonly disabledSteps: readonly TickStep[];
+  readonly safetyLevel: OrchestratorConfigSafetyLevel;
+  readonly isProductionGrade: boolean;
+  readonly isTournamentGrade: boolean;
+  readonly trailLength: number;
+  readonly maxConsecutiveTickErrors: number;
+  readonly sealStepEnabled: boolean;
+  readonly flushStepEnabled: boolean;
+  readonly failClosedFlags: number;    // count of fail-closed / quarantine flags active
+  readonly notes: readonly string[];
+}
+
+function computeSafetyLevel(safety: OrchestratorSafetyPolicy): OrchestratorConfigSafetyLevel {
+  const strictCount = [
+    safety.failClosedOnRegistryGap,
+    safety.abortRunOnFatalSealError,
+    safety.quarantineOnFlushError,
+    safety.quarantineOnSealMismatch,
+    safety.failClosedOnInvalidProfile,
+    safety.failClosedOnInvalidModeOverride,
+    safety.preserveTerminalSnapshotOnAbort,
+  ].filter(Boolean).length;
+
+  if (strictCount >= 6 && safety.maxConsecutiveTickErrors <= 5) {
+    return 'strict';
+  }
+  if (strictCount >= 3 && safety.maxConsecutiveTickErrors <= 10) {
+    return 'standard';
+  }
+  return 'permissive';
+}
+
+/**
+ * buildOrchestratorConfigChatSignal
+ *
+ * Constructs the OrchestratorConfigChatSignal from a resolved config.
+ * Should be called immediately after resolveOrchestratorConfig() to produce
+ * the signal for chat-lane emission.
+ *
+ * Usage:
+ *   const resolved = resolveOrchestratorConfig({ profileId: 'production', mode: 'solo' });
+ *   const signal = buildOrchestratorConfigChatSignal(resolved);
+ *   // → { kind: 'orchestrator-config.resolved', profileId: 'production', ... }
+ */
+export function buildOrchestratorConfigChatSignal(
+  resolved: ResolvedOrchestratorConfig,
+): OrchestratorConfigChatSignal {
+  const disabledSteps = ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.filter(
+    (s) => !resolved.stepConfig[s].enabled,
+  );
+  const enabledStepCount = ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.length - disabledSteps.length;
+  const safetyLevel = computeSafetyLevel(resolved.safety);
+  const failClosedFlags = [
+    resolved.safety.failClosedOnRegistryGap,
+    resolved.safety.abortRunOnFatalSealError,
+    resolved.safety.quarantineOnFlushError,
+    resolved.safety.quarantineOnSealMismatch,
+    resolved.safety.failClosedOnInvalidProfile,
+    resolved.safety.failClosedOnInvalidModeOverride,
+    resolved.safety.preserveTerminalSnapshotOnAbort,
+  ].filter(Boolean).length;
+
+  const isProductionGrade = resolved.resolvedProfileId === 'production'
+    || resolved.resolvedProfileId === 'tournament';
+  const isTournamentGrade = resolved.resolvedProfileId === 'tournament';
+
+  return Object.freeze({
+    kind: 'orchestrator-config.resolved',
+    profileId: resolved.resolvedProfileId,
+    mode: resolved.resolvedMode,
+    lifecycleState: resolved.resolvedLifecycleState,
+    fingerprint: resolved.fingerprint,
+    enabledStepCount,
+    disabledStepCount: disabledSteps.length,
+    totalStepCount: ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.length,
+    disabledSteps: Object.freeze([...disabledSteps]),
+    safetyLevel,
+    isProductionGrade,
+    isTournamentGrade,
+    trailLength: resolved.trail.length,
+    maxConsecutiveTickErrors: resolved.safety.maxConsecutiveTickErrors,
+    sealStepEnabled: resolved.stepConfig.STEP_12_EVENT_SEAL.enabled,
+    flushStepEnabled: resolved.stepConfig.STEP_13_FLUSH.enabled,
+    failClosedFlags,
+    notes: resolved.config.notes,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// TREND ANALYZER — tracks config resolution patterns across a session
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface OrchestratorConfigTrendSnapshot {
+  readonly capturedAt: number;
+  readonly entryCount: number;
+  readonly dominantProfileId: OrchestratorProfileId | null;
+  readonly dominantMode: ModeCode | null;
+  readonly profileDistribution: Readonly<Partial<Record<OrchestratorProfileId, number>>>;
+  readonly modeDistribution: Readonly<Partial<Record<ModeCode, number>>>;
+  readonly averageEnabledStepCount: number;
+  readonly profileSwitchCount: number;
+  readonly modeSwitchCount: number;
+  readonly safetyLevelDistribution: Readonly<Record<OrchestratorConfigSafetyLevel, number>>;
+  readonly fingerprintCollisionCount: number;
+  readonly uniqueFingerprintCount: number;
+}
+
+export interface OrchestratorConfigTrendEntry {
+  readonly resolvedAt: number;
+  readonly fingerprint: string;
+  readonly profileId: OrchestratorProfileId;
+  readonly mode: ModeCode | null;
+  readonly enabledStepCount: number;
+  readonly safetyLevel: OrchestratorConfigSafetyLevel;
+}
+
+/**
+ * OrchestratorConfigTrendAnalyzer
+ *
+ * Tracks a rolling history of resolved OrchestratorConfig signals to detect
+ * config drift, profile switching patterns, and mode distribution across a session.
+ *
+ * Usage:
+ *   const analyzer = new OrchestratorConfigTrendAnalyzer(50);
+ *   analyzer.record(resolvedConfig);
+ *   const trend = analyzer.getSnapshot();
+ *   // trend.dominantProfileId, trend.profileSwitchCount, trend.averageEnabledStepCount
+ */
+export class OrchestratorConfigTrendAnalyzer {
+  private readonly history: OrchestratorConfigTrendEntry[] = [];
+  private readonly maxHistory: number;
+
+  constructor(maxHistory = 64) {
+    this.maxHistory = Math.max(8, maxHistory);
+  }
+
+  record(resolved: ResolvedOrchestratorConfig): void {
+    const entry: OrchestratorConfigTrendEntry = Object.freeze({
+      resolvedAt: Date.now(),
+      fingerprint: resolved.fingerprint,
+      profileId: resolved.resolvedProfileId,
+      mode: resolved.resolvedMode,
+      enabledStepCount: ORCHESTRATOR_CONFIG_CANONICAL_TICK_SEQUENCE.filter(
+        (s) => resolved.stepConfig[s].enabled,
+      ).length,
+      safetyLevel: computeSafetyLevel(resolved.safety),
+    });
+
+    this.history.push(entry);
+    if (this.history.length > this.maxHistory) {
+      this.history.shift();
+    }
+  }
+
+  getSnapshot(): OrchestratorConfigTrendSnapshot {
+    if (this.history.length === 0) {
+      return Object.freeze({
+        capturedAt: Date.now(),
+        entryCount: 0,
+        dominantProfileId: null,
+        dominantMode: null,
+        profileDistribution: Object.freeze({}),
+        modeDistribution: Object.freeze({}),
+        averageEnabledStepCount: 0,
+        profileSwitchCount: 0,
+        modeSwitchCount: 0,
+        safetyLevelDistribution: Object.freeze({ strict: 0, standard: 0, permissive: 0 }),
+        fingerprintCollisionCount: 0,
+        uniqueFingerprintCount: 0,
+      });
+    }
+
+    const profileCounts = new Map<OrchestratorProfileId, number>();
+    const modeCounts = new Map<ModeCode | null, number>();
+    const safetyLevelCounts: Record<OrchestratorConfigSafetyLevel, number> = {
+      strict: 0,
+      standard: 0,
+      permissive: 0,
+    };
+    const fingerprintSet = new Set<string>();
+    let totalEnabledStepCount = 0;
+    let profileSwitchCount = 0;
+    let modeSwitchCount = 0;
+    let fingerprintCollisionCount = 0;
+
+    for (let index = 0; index < this.history.length; index += 1) {
+      const entry = this.history[index];
+
+      profileCounts.set(entry.profileId, (profileCounts.get(entry.profileId) ?? 0) + 1);
+      modeCounts.set(entry.mode, (modeCounts.get(entry.mode) ?? 0) + 1);
+      safetyLevelCounts[entry.safetyLevel] += 1;
+      totalEnabledStepCount += entry.enabledStepCount;
+
+      if (fingerprintSet.has(entry.fingerprint)) {
+        fingerprintCollisionCount += 1;
+      } else {
+        fingerprintSet.add(entry.fingerprint);
+      }
+
+      if (index > 0) {
+        const prev = this.history[index - 1];
+        if (prev.profileId !== entry.profileId) {
+          profileSwitchCount += 1;
+        }
+        if (prev.mode !== entry.mode) {
+          modeSwitchCount += 1;
+        }
+      }
+    }
+
+    let dominantProfileId: OrchestratorProfileId | null = null;
+    let dominantProfileCount = 0;
+    for (const [profileId, count] of profileCounts) {
+      if (count > dominantProfileCount) {
+        dominantProfileCount = count;
+        dominantProfileId = profileId;
+      }
+    }
+
+    let dominantMode: ModeCode | null = null;
+    let dominantModeCount = 0;
+    for (const [mode, count] of modeCounts) {
+      if (count > dominantModeCount && mode !== null) {
+        dominantModeCount = count;
+        dominantMode = mode as ModeCode;
+      }
+    }
+
+    const profileDistribution: Partial<Record<OrchestratorProfileId, number>> = {};
+    for (const [profileId, count] of profileCounts) {
+      profileDistribution[profileId] = count;
+    }
+
+    const modeDistribution: Partial<Record<ModeCode, number>> = {};
+    for (const [mode, count] of modeCounts) {
+      if (mode !== null) {
+        modeDistribution[mode as ModeCode] = count;
+      }
+    }
+
+    return Object.freeze({
+      capturedAt: Date.now(),
+      entryCount: this.history.length,
+      dominantProfileId,
+      dominantMode,
+      profileDistribution: Object.freeze(profileDistribution),
+      modeDistribution: Object.freeze(modeDistribution),
+      averageEnabledStepCount: totalEnabledStepCount / this.history.length,
+      profileSwitchCount,
+      modeSwitchCount,
+      safetyLevelDistribution: Object.freeze({ ...safetyLevelCounts }),
+      fingerprintCollisionCount,
+      uniqueFingerprintCount: fingerprintSet.size,
+    });
+  }
+
+  getHistory(): readonly OrchestratorConfigTrendEntry[] {
+    return Object.freeze([...this.history]);
+  }
+
+  clear(): void {
+    this.history.length = 0;
+  }
+
+  get entryCount(): number {
+    return this.history.length;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// SESSION ANALYTICS — aggregate config resolution metrics across a full session
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface OrchestratorConfigResolutionEvent {
+  readonly resolvedAt: number;
+  readonly fingerprint: string;
+  readonly profileId: OrchestratorProfileId;
+  readonly mode: ModeCode | null;
+  readonly lifecycleState: string | null;
+  readonly trailLength: number;
+  readonly enabledStepCount: number;
+  readonly safetyLevel: OrchestratorConfigSafetyLevel;
+  readonly isProductionGrade: boolean;
+  readonly isTournamentGrade: boolean;
+  readonly failClosedFlags: number;
+  readonly durationMs?: number;          // set if a subsequent resolution is recorded
+}
+
+export interface OrchestratorConfigSessionReport {
+  readonly sessionId: string;
+  readonly startedAt: number;
+  readonly capturedAt: number;
+  readonly totalResolutions: number;
+  readonly uniqueFingerprints: number;
+  readonly averageTrailLength: number;
+  readonly averageEnabledStepCount: number;
+  readonly dominantProfileId: OrchestratorProfileId | null;
+  readonly dominantMode: ModeCode | null;
+  readonly productionGradeResolutions: number;
+  readonly tournamentGradeResolutions: number;
+  readonly strictSafetyResolutions: number;
+  readonly permissiveSafetyResolutions: number;
+  readonly totalProfileSwitches: number;
+  readonly totalModeSwitches: number;
+  readonly profileDistribution: Readonly<Partial<Record<OrchestratorProfileId, number>>>;
+  readonly modeDistribution: Readonly<Partial<Record<ModeCode, number>>>;
+  readonly events: readonly OrchestratorConfigResolutionEvent[];
+}
+
+/**
+ * OrchestratorConfigSessionAnalytics
+ *
+ * Records every config resolution in a session and produces a full aggregate report.
+ * Intended for ops-board visibility and post-run replay audits.
+ *
+ * Usage:
+ *   const analytics = new OrchestratorConfigSessionAnalytics('session-abc');
+ *   analytics.record(resolved1);
+ *   analytics.record(resolved2);
+ *   const report = analytics.buildReport();
+ *   // report.dominantProfileId, report.totalResolutions, report.productionGradeResolutions
+ */
+export class OrchestratorConfigSessionAnalytics {
+  private readonly sessionId: string;
+  private readonly startedAt: number;
+  private readonly events: OrchestratorConfigResolutionEvent[] = [];
+
+  constructor(sessionId: string) {
+    this.sessionId = sessionId;
+    this.startedAt = Date.now();
+  }
+
+  record(resolved: ResolvedOrchestratorConfig): void {
+    const now = Date.now();
+    const signal = buildOrchestratorConfigChatSignal(resolved);
+    const prev = this.events.length > 0 ? this.events[this.events.length - 1] : null;
+
+    if (prev && prev.durationMs === undefined) {
+      const updated: OrchestratorConfigResolutionEvent = Object.freeze({
+        ...prev,
+        durationMs: now - prev.resolvedAt,
+      });
+      this.events[this.events.length - 1] = updated;
+    }
+
+    this.events.push(Object.freeze({
+      resolvedAt: now,
+      fingerprint: signal.fingerprint,
+      profileId: signal.profileId,
+      mode: signal.mode,
+      lifecycleState: signal.lifecycleState,
+      trailLength: signal.trailLength,
+      enabledStepCount: signal.enabledStepCount,
+      safetyLevel: signal.safetyLevel,
+      isProductionGrade: signal.isProductionGrade,
+      isTournamentGrade: signal.isTournamentGrade,
+      failClosedFlags: signal.failClosedFlags,
+    }));
+  }
+
+  buildReport(): OrchestratorConfigSessionReport {
+    const profileCounts = new Map<OrchestratorProfileId, number>();
+    const modeCounts = new Map<ModeCode | null, number>();
+    const fingerprintSet = new Set<string>();
+    let totalTrailLength = 0;
+    let totalEnabledStepCount = 0;
+    let productionGradeResolutions = 0;
+    let tournamentGradeResolutions = 0;
+    let strictSafetyResolutions = 0;
+    let permissiveSafetyResolutions = 0;
+    let totalProfileSwitches = 0;
+    let totalModeSwitches = 0;
+
+    for (let index = 0; index < this.events.length; index += 1) {
+      const event = this.events[index];
+      profileCounts.set(event.profileId, (profileCounts.get(event.profileId) ?? 0) + 1);
+      modeCounts.set(event.mode, (modeCounts.get(event.mode) ?? 0) + 1);
+      fingerprintSet.add(event.fingerprint);
+      totalTrailLength += event.trailLength;
+      totalEnabledStepCount += event.enabledStepCount;
+
+      if (event.isProductionGrade) {
+        productionGradeResolutions += 1;
+      }
+      if (event.isTournamentGrade) {
+        tournamentGradeResolutions += 1;
+      }
+      if (event.safetyLevel === 'strict') {
+        strictSafetyResolutions += 1;
+      }
+      if (event.safetyLevel === 'permissive') {
+        permissiveSafetyResolutions += 1;
+      }
+
+      if (index > 0) {
+        const prev = this.events[index - 1];
+        if (prev.profileId !== event.profileId) {
+          totalProfileSwitches += 1;
+        }
+        if (prev.mode !== event.mode) {
+          totalModeSwitches += 1;
+        }
+      }
+    }
+
+    let dominantProfileId: OrchestratorProfileId | null = null;
+    let dominantProfileCount = 0;
+    for (const [profileId, count] of profileCounts) {
+      if (count > dominantProfileCount) {
+        dominantProfileCount = count;
+        dominantProfileId = profileId;
+      }
+    }
+
+    let dominantMode: ModeCode | null = null;
+    let dominantModeCount = 0;
+    for (const [mode, count] of modeCounts) {
+      if (count > dominantModeCount && mode !== null) {
+        dominantModeCount = count;
+        dominantMode = mode as ModeCode;
+      }
+    }
+
+    const profileDistribution: Partial<Record<OrchestratorProfileId, number>> = {};
+    for (const [profileId, count] of profileCounts) {
+      profileDistribution[profileId] = count;
+    }
+
+    const modeDistribution: Partial<Record<ModeCode, number>> = {};
+    for (const [mode, count] of modeCounts) {
+      if (mode !== null) {
+        modeDistribution[mode as ModeCode] = count;
+      }
+    }
+
+    const n = this.events.length;
+
+    return Object.freeze({
+      sessionId: this.sessionId,
+      startedAt: this.startedAt,
+      capturedAt: Date.now(),
+      totalResolutions: n,
+      uniqueFingerprints: fingerprintSet.size,
+      averageTrailLength: n > 0 ? totalTrailLength / n : 0,
+      averageEnabledStepCount: n > 0 ? totalEnabledStepCount / n : 0,
+      dominantProfileId,
+      dominantMode,
+      productionGradeResolutions,
+      tournamentGradeResolutions,
+      strictSafetyResolutions,
+      permissiveSafetyResolutions,
+      totalProfileSwitches,
+      totalModeSwitches,
+      profileDistribution: Object.freeze(profileDistribution),
+      modeDistribution: Object.freeze(modeDistribution),
+      events: Object.freeze([...this.events]),
+    });
+  }
+
+  get totalResolutions(): number {
+    return this.events.length;
+  }
+
+  get sessionIdentifier(): string {
+    return this.sessionId;
+  }
+
+  clear(): void {
+    this.events.length = 0;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// CONFIG INSPECTOR — structured read-only interrogation surface
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface OrchestratorConfigInspectionResult {
+  readonly fingerprint: string;
+  readonly profileId: OrchestratorProfileId;
+  readonly mode: ModeCode | null;
+  readonly lifecycleState: string | null;
+  readonly safetyLevel: OrchestratorConfigSafetyLevel;
+  readonly isProductionGrade: boolean;
+  readonly isTournamentGrade: boolean;
+  readonly enabledStepCount: number;
+  readonly disabledStepCount: number;
+  readonly disabledSteps: readonly TickStep[];
+  readonly sealStepEnabled: boolean;
+  readonly flushStepEnabled: boolean;
+  readonly maxConsecutiveTickErrors: number;
+  readonly failClosedFlags: number;
+  readonly trailLength: number;
+  readonly mlVector: OrchestratorConfigMLVector;
+  readonly dlTensor: OrchestratorConfigDLTensor;
+  readonly chatSignal: OrchestratorConfigChatSignal;
+  readonly mlArray: readonly number[];
+  readonly dlFlatArray: readonly number[];
+  readonly configNotes: readonly string[];
+  readonly validationReport: OrchestratorConfigValidationReport;
+}
+
+/**
+ * inspectResolvedOrchestratorConfig
+ *
+ * Produces a comprehensive read-only inspection bundle from a resolved config.
+ * Includes ML vector, DL tensor, chat signal, validation report, and all key
+ * policy summaries in a single call. Intended for ops-board and diagnostic surfaces.
+ *
+ * Usage:
+ *   const resolved = resolveOrchestratorConfig({ profileId: 'tournament', mode: 'pvp' });
+ *   const result = inspectResolvedOrchestratorConfig(resolved);
+ *   // result.mlVector, result.dlTensor, result.chatSignal, result.safetyLevel
+ */
+export function inspectResolvedOrchestratorConfig(
+  resolved: ResolvedOrchestratorConfig,
+): OrchestratorConfigInspectionResult {
+  const mlVector = extractOrchestratorConfigMLVector(resolved);
+  const dlTensor = buildOrchestratorConfigDLTensor(resolved);
+  const chatSignal = buildOrchestratorConfigChatSignal(resolved);
+  const validationReport = validateOrchestratorConfig(resolved.config);
+
+  return Object.freeze({
+    fingerprint: resolved.fingerprint,
+    profileId: resolved.resolvedProfileId,
+    mode: resolved.resolvedMode,
+    lifecycleState: resolved.resolvedLifecycleState,
+    safetyLevel: chatSignal.safetyLevel,
+    isProductionGrade: chatSignal.isProductionGrade,
+    isTournamentGrade: chatSignal.isTournamentGrade,
+    enabledStepCount: chatSignal.enabledStepCount,
+    disabledStepCount: chatSignal.disabledStepCount,
+    disabledSteps: chatSignal.disabledSteps,
+    sealStepEnabled: chatSignal.sealStepEnabled,
+    flushStepEnabled: chatSignal.flushStepEnabled,
+    maxConsecutiveTickErrors: chatSignal.maxConsecutiveTickErrors,
+    failClosedFlags: chatSignal.failClosedFlags,
+    trailLength: chatSignal.trailLength,
+    mlVector,
+    dlTensor,
+    chatSignal,
+    mlArray: mlVectorToArray(mlVector),
+    dlFlatArray: dlTensorToFlatArray(dlTensor),
+    configNotes: resolved.config.notes,
+    validationReport,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// ORCHESTRATOR CONFIG WITH ANALYTICS — full factory surface
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface OrchestratorConfigWithAnalytics {
+  readonly resolved: ResolvedOrchestratorConfig;
+  readonly mlVector: OrchestratorConfigMLVector;
+  readonly dlTensor: OrchestratorConfigDLTensor;
+  readonly chatSignal: OrchestratorConfigChatSignal;
+  readonly inspection: OrchestratorConfigInspectionResult;
+  readonly trendAnalyzer: OrchestratorConfigTrendAnalyzer;
+  readonly sessionAnalytics: OrchestratorConfigSessionAnalytics;
+}
+
+/**
+ * createOrchestratorConfigWithAnalytics
+ *
+ * Factory that resolves an OrchestratorConfig and simultaneously builds the full
+ * analytics bundle: ML vector, DL tensor, chat signal, inspection result,
+ * a fresh trend analyzer, and a fresh session analytics instance.
+ *
+ * Entry points:
+ *   const bundle = createOrchestratorConfigWithAnalytics({ profileId: 'production', mode: 'pvp' });
+ *   const { resolved, mlVector, dlTensor, chatSignal, inspection } = bundle;
+ *   bundle.trendAnalyzer.record(resolved);
+ *   bundle.sessionAnalytics.record(resolved);
+ *   const report = bundle.sessionAnalytics.buildReport();
+ */
+export function createOrchestratorConfigWithAnalytics(
+  input: ResolveOrchestratorConfigInput = {},
+  sessionId?: string,
+): OrchestratorConfigWithAnalytics {
+  const resolved = resolveOrchestratorConfig(input);
+  const mlVector = extractOrchestratorConfigMLVector(resolved);
+  const dlTensor = buildOrchestratorConfigDLTensor(resolved);
+  const chatSignal = buildOrchestratorConfigChatSignal(resolved);
+  const inspection = inspectResolvedOrchestratorConfig(resolved);
+  const trendAnalyzer = new OrchestratorConfigTrendAnalyzer(64);
+  const analytics = new OrchestratorConfigSessionAnalytics(
+    sessionId ?? `oc-session-${Date.now()}`,
+  );
+
+  trendAnalyzer.record(resolved);
+  analytics.record(resolved);
+
+  return Object.freeze({
+    resolved,
+    mlVector,
+    dlTensor,
+    chatSignal,
+    inspection,
+    trendAnalyzer,
+    sessionAnalytics: analytics,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// PROFILE RESOLUTION INSPECTOR — surfaces which policies are active for a profile
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ProfileResolutionSummary {
+  readonly profileId: OrchestratorProfileId;
+  readonly label: string;
+  readonly notes: readonly string[];
+  readonly safetyOverrideCount: number;
+  readonly eventOverrideCount: number;
+  readonly diagnosticsOverrideCount: number;
+  readonly lifecycleOverrideCount: number;
+  readonly stepOverrideCount: number;
+  readonly hasModeOverrides: boolean;
+  readonly hasRequiredEngineOverrides: boolean;
+  readonly resolvedFingerprint: string;
+}
+
+function countDefinedKeys(obj: Record<string, unknown> | undefined): number {
+  if (!obj) {
+    return 0;
+  }
+  return Object.keys(obj).filter((k) => obj[k] !== undefined).length;
+}
+
+/**
+ * buildProfileResolutionSummary
+ *
+ * Summarizes which policy layers a specific profile activates and how many
+ * overrides it introduces relative to the base config defaults.
+ *
+ * Usage:
+ *   const config = createProductionOrchestratorConfig();
+ *   const summary = buildProfileResolutionSummary(config, 'production');
+ *   // summary.safetyOverrideCount, summary.hasModeOverrides
+ */
+export function buildProfileResolutionSummary(
+  config: OrchestratorConfig,
+  profileId: OrchestratorProfileId,
+): ProfileResolutionSummary {
+  const profile = config.profiles[profileId];
+  if (!profile) {
+    throw new Error(`[OrchestratorConfig] Profile not found: ${profileId}`);
+  }
+
+  const resolved = resolveOrchestratorConfig({ config, profileId });
+  const safetyOverrideCount = countDefinedKeys(profile.safety as Record<string, unknown> | undefined);
+  const eventOverrideCount = countDefinedKeys(profile.events as Record<string, unknown> | undefined);
+  const diagnosticsOverrideCount = countDefinedKeys(profile.diagnostics as Record<string, unknown> | undefined);
+  const lifecycleOverrideCount = countDefinedKeys(profile.lifecycle as Record<string, unknown> | undefined);
+  const stepOverrideCount = profile.stepConfig
+    ? Object.keys(profile.stepConfig).length
+    : 0;
+
+  return Object.freeze({
+    profileId,
+    label: profile.label,
+    notes: profile.notes,
+    safetyOverrideCount,
+    eventOverrideCount,
+    diagnosticsOverrideCount,
+    lifecycleOverrideCount,
+    stepOverrideCount,
+    hasModeOverrides: !!(profile.modeOverrides && Object.keys(profile.modeOverrides).length > 0),
+    hasRequiredEngineOverrides: !!(profile.requiredEngineIds && profile.requiredEngineIds.length > 0),
+    resolvedFingerprint: resolved.fingerprint,
+  });
+}
+
+/**
+ * buildAllProfileResolutionSummaries
+ *
+ * Builds a ProfileResolutionSummary for every registered profile in the config.
+ * Useful for ops-board displays that need to enumerate all active policy layers.
+ */
+export function buildAllProfileResolutionSummaries(
+  config: OrchestratorConfig,
+): readonly ProfileResolutionSummary[] {
+  return Object.freeze(
+    ZERO_ORCHESTRATOR_PROFILE_IDS.map((profileId) =>
+      buildProfileResolutionSummary(config, profileId),
+    ),
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// MODE RESOLUTION INSPECTOR — surfaces effective policy for a mode
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ModeResolutionSummary {
+  readonly mode: ModeCode;
+  readonly resolvedProfileId: OrchestratorProfileId;
+  readonly safetyLevel: OrchestratorConfigSafetyLevel;
+  readonly enabledStepCount: number;
+  readonly disabledStepCount: number;
+  readonly disabledSteps: readonly TickStep[];
+  readonly fingerprint: string;
+  readonly mlVector: OrchestratorConfigMLVector;
+  readonly chatSignal: OrchestratorConfigChatSignal;
+  readonly notes: readonly string[];
+}
+
+/**
+ * buildModeResolutionSummary
+ *
+ * Resolves the effective config for a mode + profile pair and returns the full
+ * policy summary including ML vector and chat signal.
+ *
+ * Usage:
+ *   const config = createProductionOrchestratorConfig();
+ *   const summary = buildModeResolutionSummary(config, 'pvp', 'tournament');
+ */
+export function buildModeResolutionSummary(
+  config: OrchestratorConfig,
+  mode: ModeCode,
+  profileId?: OrchestratorProfileId,
+): ModeResolutionSummary {
+  const resolved = resolveOrchestratorConfig({ config, mode, profileId });
+  const mlVector = extractOrchestratorConfigMLVector(resolved);
+  const chatSignal = buildOrchestratorConfigChatSignal(resolved);
+
+  return Object.freeze({
+    mode,
+    resolvedProfileId: resolved.resolvedProfileId,
+    safetyLevel: chatSignal.safetyLevel,
+    enabledStepCount: chatSignal.enabledStepCount,
+    disabledStepCount: chatSignal.disabledStepCount,
+    disabledSteps: chatSignal.disabledSteps,
+    fingerprint: resolved.fingerprint,
+    mlVector,
+    chatSignal,
+    notes: config.modePolicies[mode].notes ?? Object.freeze([]),
+  });
+}
+
+/**
+ * buildAllModeResolutionSummaries
+ *
+ * Builds a ModeResolutionSummary for all four supported modes under a given profile.
+ */
+export function buildAllModeResolutionSummaries(
+  config: OrchestratorConfig,
+  profileId?: OrchestratorProfileId,
+): readonly ModeResolutionSummary[] {
+  return Object.freeze(
+    ZERO_SUPPORTED_MODES.map((mode) =>
+      buildModeResolutionSummary(config, mode, profileId),
+    ),
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// EXPORTED ANALYTICS SINGLETONS — pre-built bundle for the default config
+// ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE
+ *
+ * Full analytics bundle for the default OrchestratorConfig. Includes the resolved
+ * config, ML vector, DL tensor, chat signal, inspection result, trend analyzer,
+ * and session analytics — all seeded from the default profile.
+ *
+ * Usage:
+ *   import { Zero } from '../../engine';
+ *   const vec = Zero.ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.mlVector;
+ *   const tensor = Zero.ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.dlTensor;
+ *   const signal = Zero.ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.chatSignal;
+ */
+export const ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE: OrchestratorConfigWithAnalytics =
+  createOrchestratorConfigWithAnalytics({}, 'zero-default-session');
+
+/**
+ * ZERO_PRODUCTION_ORCHESTRATOR_CONFIG_BUNDLE
+ *
+ * Full analytics bundle for the production-profile OrchestratorConfig.
+ */
+export const ZERO_PRODUCTION_ORCHESTRATOR_CONFIG_BUNDLE: OrchestratorConfigWithAnalytics =
+  createOrchestratorConfigWithAnalytics({ profileId: 'production' }, 'zero-production-session');
+
+/**
+ * ZERO_TOURNAMENT_ORCHESTRATOR_CONFIG_BUNDLE
+ *
+ * Full analytics bundle for the tournament-profile OrchestratorConfig.
+ * Carries the strictest safety posture — isTournamentGrade === true.
+ */
+export const ZERO_TOURNAMENT_ORCHESTRATOR_CONFIG_BUNDLE: OrchestratorConfigWithAnalytics =
+  createOrchestratorConfigWithAnalytics({ profileId: 'tournament' }, 'zero-tournament-session');
+
+/**
+ * ZERO_ORCHESTRATOR_CONFIG_TREND_ANALYZER
+ *
+ * Singleton OrchestratorConfigTrendAnalyzer seeded with the default, production,
+ * and tournament configs. Ready-to-use for in-process orchestration monitoring.
+ */
+export const ZERO_ORCHESTRATOR_CONFIG_TREND_ANALYZER: OrchestratorConfigTrendAnalyzer =
+  (() => {
+    const analyzer = new OrchestratorConfigTrendAnalyzer(128);
+    analyzer.record(ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.resolved);
+    analyzer.record(ZERO_PRODUCTION_ORCHESTRATOR_CONFIG_BUNDLE.resolved);
+    analyzer.record(ZERO_TOURNAMENT_ORCHESTRATOR_CONFIG_BUNDLE.resolved);
+    return analyzer;
+  })();
+
+/**
+ * ZERO_ORCHESTRATOR_CONFIG_SESSION_ANALYTICS
+ *
+ * Singleton OrchestratorConfigSessionAnalytics for the process lifetime.
+ * Consumers should call .record(resolved) on each config resolution to accumulate
+ * session history. Call .buildReport() for the full aggregate.
+ */
+export const ZERO_ORCHESTRATOR_CONFIG_SESSION_ANALYTICS: OrchestratorConfigSessionAnalytics =
+  new OrchestratorConfigSessionAnalytics('zero-process-session');
+
+/**
+ * ZERO_DEFAULT_ORCHESTRATOR_ML_VECTOR
+ *
+ * Pre-computed 32-dimensional ML vector for the default OrchestratorConfig.
+ * Useful as a baseline reference for ML distance computations.
+ */
+export const ZERO_DEFAULT_ORCHESTRATOR_ML_VECTOR: OrchestratorConfigMLVector =
+  ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.mlVector;
+
+/**
+ * ZERO_DEFAULT_ORCHESTRATOR_DL_TENSOR
+ *
+ * Pre-computed 13×10 DL tensor for the default OrchestratorConfig.
+ */
+export const ZERO_DEFAULT_ORCHESTRATOR_DL_TENSOR: OrchestratorConfigDLTensor =
+  ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.dlTensor;
+
+/**
+ * ZERO_DEFAULT_ORCHESTRATOR_CHAT_SIGNAL
+ *
+ * Pre-built OrchestratorConfigChatSignal for the default config — useful as a
+ * baseline or placeholder before a run-specific config is resolved.
+ */
+export const ZERO_DEFAULT_ORCHESTRATOR_CHAT_SIGNAL: OrchestratorConfigChatSignal =
+  ZERO_DEFAULT_ORCHESTRATOR_CONFIG_BUNDLE.chatSignal;
+
+/**
+ * ZERO_ALL_PROFILE_SUMMARIES
+ *
+ * Pre-built ProfileResolutionSummary for all registered profiles under the
+ * default config. Consumed by ops-board renderers and config audit surfaces.
+ */
+export const ZERO_ALL_PROFILE_SUMMARIES: readonly ProfileResolutionSummary[] =
+  buildAllProfileResolutionSummaries(ZERO_DEFAULT_ORCHESTRATOR_CONFIG);
+
+/**
+ * ZERO_ALL_MODE_SUMMARIES_DEFAULT_PROFILE
+ *
+ * Pre-built ModeResolutionSummary for all four game modes under the default profile.
+ */
+export const ZERO_ALL_MODE_SUMMARIES_DEFAULT_PROFILE: readonly ModeResolutionSummary[] =
+  buildAllModeResolutionSummaries(ZERO_DEFAULT_ORCHESTRATOR_CONFIG);
+
+/**
+ * ZERO_ALL_MODE_SUMMARIES_PRODUCTION_PROFILE
+ *
+ * Pre-built ModeResolutionSummary for all four game modes under the production profile.
+ */
+export const ZERO_ALL_MODE_SUMMARIES_PRODUCTION_PROFILE: readonly ModeResolutionSummary[] =
+  buildAllModeResolutionSummaries(ZERO_PRODUCTION_ORCHESTRATOR_CONFIG, 'production');
+

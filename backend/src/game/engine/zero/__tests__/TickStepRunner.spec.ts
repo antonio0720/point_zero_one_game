@@ -127,7 +127,7 @@ describe('TickStepRunner', () => {
         tickPatch: {
           pressure: {
             ...base.pressure,
-            current: Number((base.pressure.current + 0.12).toFixed(6)),
+            score: Number((base.pressure.score + 0.12).toFixed(6)),
             tier: 'T2',
           },
         },
@@ -138,8 +138,7 @@ describe('TickStepRunner', () => {
         tickPatch: {
           tension: {
             ...base.tension,
-            current: Number((base.tension.current + 0.18).toFixed(6)),
-            visibleThreatIds: ['threat-x'],
+            score: Number((base.tension.score + 0.18).toFixed(6)),
           },
         },
       },
@@ -153,10 +152,13 @@ describe('TickStepRunner', () => {
               ...base.battle.pendingAttacks,
               {
                 attackId: 'attack-001',
-                source: 'BOT_01',
-                targetLayerId: 'L2',
-                damage: 9,
-                tags: ['test'],
+                source: 'BOT_01' as const,
+                targetEntity: 'SELF' as const,
+                targetLayer: 'L2' as const,
+                category: 'DRAIN' as const,
+                magnitude: 9,
+                createdAtTick: 0,
+                notes: ['test'],
               },
             ],
           },
@@ -182,10 +184,13 @@ describe('TickStepRunner', () => {
               ...base.cascade.activeChains,
               {
                 chainId: 'chain-001',
-                status: 'ACTIVE',
-                severity: 'HIGH',
+                templateId: 'test-template',
+                trigger: 'test',
+                positive: false,
+                status: 'ACTIVE' as const,
                 links: [],
-                originTick: base.tick,
+                createdAtTick: base.tick,
+                recoveryTags: [],
               },
             ],
           },
@@ -250,7 +255,7 @@ describe('TickStepRunner', () => {
     const modeReconciled = createSnapshot('tick-step-runner-mode-post', {
       modeState: {
         ...base.modeState,
-        labels: [...base.modeState.labels, 'mode-post'],
+        handicapIds: [...base.modeState.handicapIds, 'mode-post'],
       },
     });
     const telemetered = createSnapshot('tick-step-runner-telemetry', {

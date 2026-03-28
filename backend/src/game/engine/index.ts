@@ -256,7 +256,22 @@ export * as Time from './time';
  * with 32-dim ML vector, 6×8 DL tensor, health monitoring, timeline tracking,
  * telemetry extraction, and chat signal construction — all available at Zero.*),
  * TickExecutor (13-step execution), TickStateLock (mutation guards),
- * OutcomeGate (terminal outcome resolution), EventFlushCoordinator (tick-boundary
+ * OutcomeGate (terminal outcome resolution with 32-dim gate ML vector, 48-dim gate
+ * DL tensor, OutcomeGateChatSignal→LIVEOPS routing, trend analysis across ticks,
+ * per-session aggregate stats, event log with checksums, UX annotation bundles,
+ * full inspection bundles, narration hint bridge, gate health monitoring, batch
+ * resolution with ML aggregation, and contract validation — consumed by
+ * OutcomeGateSignalAdapter in chat adapter suite; entry points:
+ *   createOutcomeGateWithAnalytics, DEFAULT_OUTCOME_GATE, STRICT_OUTCOME_GATE,
+ *   RELAXED_OUTCOME_GATE, ZERO_DEFAULT_OUTCOME_GATE_CHAT_SIGNAL,
+ *   extractOutcomeGateMLVector, buildOutcomeGateDLTensor,
+ *   computeOutcomeGateProximity, buildOutcomeGateNarrationHint,
+ *   validateOutcomeGateResult, buildOutcomeGateAnnotation,
+ *   scoreOutcomeGateHealth, encodeOutcomeGateSeverity, classifyOutcomeGateRisk,
+ *   getOutcomeGateActionRecommendation, flattenOutcomeGateDLTensor,
+ *   buildOutcomeGateMLNamedMap, computeOutcomeGateMLSimilarity,
+ *   getTopOutcomeGateFeatures, extractOutcomeGateDLColumn),
+ * EventFlushCoordinator (tick-boundary
  * flush with 32-dim ML vector, 40×8 DL tensor, FlushChatSignal→LIVEOPS routing,
  * MerkleChain seal chaining, fault detection, narrative generation, trend and
  * recovery forecasting — consumed by EventFlushSignalAdapter in chat adapter suite;
@@ -277,7 +292,21 @@ export * as Time from './time';
  * session tracking, annotation bundles, event log, and run summary),
  * RuntimeCheckpointCoordinator (snapshot checkpoints), RunCommandGateway
  * (command surface), RunQueryService (query surface), StepTracePublisher
- * (trace publication), RunBootstrapPipeline (run start), RunShutdownPipeline
+ * (trace publication), RunBootstrapPipeline (authoritative run start with
+ * 32-dim ML vector, 6×6 DL tensor, BootstrapChatSignal→LIVEOPS routing,
+ * BootstrapTrendAnalyzer, BootstrapSessionTracker, BootstrapEventLog,
+ * BootstrapAnnotator, BootstrapInspector, and complete export bundles —
+ * factory: createRunBootstrapPipelineWithAnalytics; singletons:
+ * ZERO_BOOTSTRAP_ML_EXTRACTOR, ZERO_BOOTSTRAP_DL_BUILDER,
+ * ZERO_BOOTSTRAP_ANNOTATOR, ZERO_BOOTSTRAP_INSPECTOR,
+ * ZERO_BOOTSTRAP_TREND_ANALYZER, ZERO_DEFAULT_BOOTSTRAP_ML_VECTOR,
+ * ZERO_DEFAULT_BOOTSTRAP_DL_TENSOR, ZERO_DEFAULT_BOOTSTRAP_CHAT_SIGNAL;
+ * utilities: extractBootstrapMLVector, buildBootstrapDLTensor,
+ * buildBootstrapChatSignal, computeBootstrapHealthScore,
+ * classifyBootstrapSeverity, validateBootstrapMLVector,
+ * flattenBootstrapDLTensor, buildBootstrapMLNamedMap,
+ * computeBootstrapMLSimilarity, getTopBootstrapFeatures,
+ * isBootstrapModeCode, isBootstrapRunOutcome), RunShutdownPipeline
  * (run end), ErrorBoundary (error isolation), RunLifecycleCoordinator
  * (lifecycle facade), and all zero.types orchestration contracts.
  *

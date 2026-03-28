@@ -76,6 +76,8 @@ import type {
   EffectPayload,
   AttackTargetEntity,
 } from '../core/GamePrimitives';
+
+type RuntimeEventMap = EngineEventMap & Record<string, unknown>;
 import type {
   RunStateSnapshot,
   DecisionRecord,
@@ -593,7 +595,7 @@ interface ZeroEngineInternalState {
 /** Options for constructing a ZeroEngine. */
 export interface ZeroEngineOptions {
   readonly clock?: SystemClock;
-  readonly bus?: EventBus<EngineEventMap>;
+  readonly bus?: EventBus<RuntimeEventMap>;
   readonly registry?: EngineRegistry;
   readonly modeDirector?: ModeRuntimeDirector;
   readonly cardRegistry?: CardRegistry;
@@ -619,7 +621,7 @@ export interface ZeroEngineOptions {
 export class ZeroEngine {
   // ─── Core infrastructure ───────────────────────────────────────────────────
   private readonly clock: SystemClock;
-  private readonly bus: EventBus<EngineEventMap>;
+  private readonly bus: EventBus<RuntimeEventMap>;
   private readonly registry: EngineRegistry;
   private readonly modeDirector: ModeRuntimeDirector;
   private readonly cardRegistry: CardRegistry;
@@ -669,7 +671,7 @@ export class ZeroEngine {
 
   public constructor(options: ZeroEngineOptions = {}) {
     this.clock = options.clock ?? new SystemClock();
-    this.bus = (options.bus ?? new EventBus<EngineEventMap>()) as EventBus<EngineEventMap>;
+    this.bus = (options.bus ?? new EventBus<RuntimeEventMap>()) as EventBus<RuntimeEventMap>;
     this.registry = options.registry ?? new EngineRegistry();
     this.modeDirector = options.modeDirector ?? new ModeRuntimeDirector();
     this.cardRegistry = options.cardRegistry ?? new CardRegistry();
@@ -2403,14 +2405,14 @@ export class ZeroEngine {
 
     // Emit on the bus as a zero-owned chat signal event
     this.bus.emit(
-      'tick.completed' as keyof (EngineEventMap & Record<string, unknown>),
+      'tick.completed' as keyof RuntimeEventMap,
       {
         runId: snapshot.runId,
         tick: snapshot.tick,
         phase: snapshot.phase,
         checksum: checksumSnapshot(snapshot),
         chatSignal: payload,
-      } as unknown as (EngineEventMap & Record<string, unknown>)[keyof (EngineEventMap & Record<string, unknown>)],
+      } as unknown as RuntimeEventMap[keyof RuntimeEventMap],
     );
 
     return emission;
@@ -2543,7 +2545,7 @@ export class ZeroEngine {
   /**
    * Get access to the underlying event bus.
    */
-  public getEventBus(): EventBus<EngineEventMap> {
+  public getEventBus(): EventBus<RuntimeEventMap> {
     return this.bus;
   }
 
@@ -2578,7 +2580,7 @@ export class ZeroEngine {
   /**
    * Classify an event by its family using ZERO_EVENT_FAMILY_BY_EVENT.
    */
-  public classifyEventFamily(eventName: keyof EngineEventMap): ZeroEventFamily {
+  public classifyEventFamily(eventName: keyof RuntimeEventMap): ZeroEventFamily {
     return ZERO_EVENT_FAMILY_BY_EVENT[eventName] ?? 'UNKNOWN';
   }
 
@@ -4017,7 +4019,7 @@ export function buildZeroEngineStack(options?: ZeroEngineOptions): {
   readonly orchestrator: EngineOrchestrator;
   readonly coordinator: RunLifecycleCoordinator;
   readonly queryService: RunQueryService;
-  readonly bus: EventBus<EngineEventMap>;
+  readonly bus: EventBus<RuntimeEventMap>;
   readonly registry: EngineRegistry;
 } {
   const engine = new ZeroEngine(options);

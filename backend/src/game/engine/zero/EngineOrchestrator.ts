@@ -40,6 +40,8 @@ import type {
   Targeting,
   TimingClass,
 } from '../core/GamePrimitives';
+
+type RuntimeEventMap = EngineEventMap & Record<string, unknown>;
 import { createInitialRunState } from '../core/RunStateFactory';
 import type {
   DecisionRecord,
@@ -126,7 +128,7 @@ export interface TickExecutionSummary {
 
 export interface EngineOrchestratorOptions {
   readonly clock?: SystemClock;
-  readonly bus?: EventBus<EngineEventMap>;
+  readonly bus?: EventBus<RuntimeEventMap>;
   readonly registry?: EngineRegistry;
   readonly modeDirector?: ModeRuntimeDirector;
   readonly cardRegistry?: CardRegistry;
@@ -150,7 +152,7 @@ type ResolvedPlayableCard = {
   readonly timingClass: readonly string[] | readonly TimingClass[];
 };
 
-type FlushEnvelope = EventEnvelope<keyof EngineEventMap, EngineEventMap[keyof EngineEventMap]>;
+type FlushEnvelope = EventEnvelope<keyof RuntimeEventMap, RuntimeEventMap[keyof RuntimeEventMap]>;
 
 interface EngineCatalog {
   readonly time: TimeEngine;
@@ -213,7 +215,7 @@ type TerminalRunOutcome = NonNullable<RunStateSnapshot['outcome']>;
 
 export class EngineOrchestrator {
   private readonly clock: SystemClock;
-  private readonly bus: EventBus<EngineEventMap>;
+  private readonly bus: EventBus<RuntimeEventMap>;
   private readonly registry: EngineRegistry;
   private readonly modeDirector: ModeRuntimeDirector;
   private readonly cardRegistry: CardRegistry;
@@ -235,7 +237,7 @@ export class EngineOrchestrator {
 
   public constructor(options: EngineOrchestratorOptions = {}) {
     this.clock = options.clock ?? new SystemClock();
-    this.bus = options.bus ?? new EventBus<EngineEventMap>();
+    this.bus = options.bus ?? new EventBus<RuntimeEventMap>();
     this.registry = options.registry ?? new EngineRegistry();
     this.modeDirector = options.modeDirector ?? new ModeRuntimeDirector();
     this.cardRegistry = options.cardRegistry ?? new CardRegistry();
@@ -1060,7 +1062,7 @@ export class EngineOrchestrator {
     nextTelemetry.outcomeReason =
       nextTelemetry.outcomeReason ?? 'orchestrator.endRun';
     nextTelemetry.outcomeReasonCode =
-      nextTelemetry.outcomeReasonCode ?? 'MANUAL_TERMINATION';
+      nextTelemetry.outcomeReasonCode ?? ('MANUAL_TERMINATION' as OutcomeReasonCode);
     nextTelemetry.warnings = limitArray(
       [...snapshot.telemetry.warnings, `RUN_ENDED:${String(outcome)}`],
       this.maxWarningsBeforeIntegrityQuarantine * 2,

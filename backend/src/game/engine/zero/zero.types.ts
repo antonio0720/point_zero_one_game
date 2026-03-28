@@ -2474,5 +2474,1168 @@ export function assertNeverMode(value: never): never {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
+// § A — primitive runtime scorers
+// Every imported type exercised here in real function bodies — not just
+// type annotations. These are the atomic computation primitives that power
+// ML, DL, narration, social-pressure, and analytics layers above.
+// ────────────────────────────────────────────────────────────────────────────────
+
+export function scoreAttackCategory(category: AttackCategory): number {
+  switch (category) {
+    case 'BREACH':      return 1.00;
+    case 'DRAIN':       return 0.85;
+    case 'EXTRACTION':  return 0.75;
+    case 'LOCK':        return 0.65;
+    case 'HEAT':        return 0.55;
+    case 'DEBT':        return 0.45;
+    default:            return 0.00;
+  }
+}
+
+export function scoreAttackTargetPriority(entity: AttackTargetEntity): number {
+  switch (entity) {
+    case 'SELF':     return 1.00;
+    case 'TEAM':     return 0.75;
+    case 'PLAYER':   return 0.60;
+    case 'OPPONENT': return 0.40;
+    default:         return 0.00;
+  }
+}
+
+export function scoreAttackEvent(attack: AttackEvent): number {
+  const cat = scoreAttackCategory(attack.category);
+  const tgt = scoreAttackTargetPriority(attack.targetEntity);
+  const mag = Math.min(1, attack.magnitude / 100);
+  return Number(((cat * 0.4) + (tgt * 0.3) + (mag * 0.3)).toFixed(4));
+}
+
+export function computeAttackEventBatch(
+  attacks: readonly AttackEvent[],
+): Readonly<{
+  totalScore: number;
+  maxMagnitude: number;
+  dominantCategory: AttackCategory | null;
+}> {
+  if (attacks.length === 0) {
+    return Object.freeze({ totalScore: 0, maxMagnitude: 0, dominantCategory: null });
+  }
+  const tally = new Map<AttackCategory, number>();
+  let maxMagnitude = 0;
+  let totalScore   = 0;
+  for (const atk of attacks) {
+    const s = scoreAttackEvent(atk);
+    totalScore += s;
+    if (atk.magnitude > maxMagnitude) maxMagnitude = atk.magnitude;
+    tally.set(atk.category, (tally.get(atk.category) ?? 0) + s);
+  }
+  let dominantCategory: AttackCategory | null = null;
+  let dominantScore = 0;
+  for (const [cat, score] of tally) {
+    if (score > dominantScore) { dominantScore = score; dominantCategory = cat; }
+  }
+  return Object.freeze({
+    totalScore:       Number((totalScore / attacks.length).toFixed(4)),
+    maxMagnitude,
+    dominantCategory,
+  });
+}
+
+export function scoreBotPosture(state: BotState): number {
+  switch (state) {
+    case 'ATTACKING':   return 1.00;
+    case 'TARGETING':   return 0.80;
+    case 'WATCHING':    return 0.50;
+    case 'RETREATING':  return 0.30;
+    case 'DORMANT':     return 0.10;
+    case 'NEUTRALIZED': return 0.00;
+    default:            return 0.00;
+  }
+}
+
+export function scorePressureTierWeight(tier: PressureTier): number {
+  switch (tier) {
+    case 'T4': return 1.00;
+    case 'T3': return 0.75;
+    case 'T2': return 0.50;
+    case 'T1': return 0.25;
+    case 'T0': return 0.00;
+    default:   return 0.00;
+  }
+}
+
+export function scoreShieldLayerPriority(id: ShieldLayerId): number {
+  switch (id) {
+    case 'L4': return 1.00;
+    case 'L3': return 0.75;
+    case 'L2': return 0.50;
+    case 'L1': return 0.25;
+    default:   return 0.00;
+  }
+}
+
+export function resolveShieldLayerDisplayName(label: ShieldLayerLabel): string {
+  switch (label) {
+    case 'NETWORK_CORE': return 'Network Core';
+    case 'INCOME_BASE':  return 'Income Base';
+    case 'CREDIT_LINE':  return 'Credit Line';
+    case 'CASH_RESERVE': return 'Cash Reserve';
+    default:             return 'Unknown Layer';
+  }
+}
+
+export function scoreTimingClassWindow(cls: TimingClass): number {
+  switch (cls) {
+    case 'PHZ': return 1.00;
+    case 'END': return 0.90;
+    case 'FATE': return 0.85;
+    case 'PSK': return 0.80;
+    case 'CTR': return 0.75;
+    case 'RES': return 0.70;
+    case 'CAS': return 0.65;
+    case 'GBM': return 0.60;
+    case 'AID': return 0.55;
+    case 'PRE': return 0.50;
+    case 'POST': return 0.45;
+    case 'ANY': return 0.30;
+    default:     return 0.00;
+  }
+}
+
+export function scoreTargetingBreadth(targeting: Targeting): number {
+  switch (targeting) {
+    case 'GLOBAL':   return 1.00;
+    case 'TEAM':     return 0.75;
+    case 'OPPONENT': return 0.60;
+    case 'TEAMMATE': return 0.50;
+    case 'SELF':     return 0.25;
+    default:         return 0.00;
+  }
+}
+
+export function scoreRunOutcomeValence(outcome: RunOutcome): number {
+  switch (outcome) {
+    case 'FREEDOM':   return  1.00;
+    case 'TIMEOUT':   return -0.25;
+    case 'BANKRUPT':  return -0.75;
+    case 'ABANDONED': return -0.50;
+    default:          return  0.00;
+  }
+}
+
+export function scoreRunPhaseRisk(phase: RunPhase): number {
+  switch (phase) {
+    case 'SOVEREIGNTY': return 1.00;
+    case 'ESCALATION':  return 0.65;
+    case 'FOUNDATION':  return 0.30;
+    default:            return 0.00;
+  }
+}
+
+export function resolveIntegrityScore(status: IntegrityStatus): number {
+  switch (status) {
+    case 'QUARANTINED': return 0.00;
+    case 'PENDING':     return 0.25;
+    case 'UNVERIFIED':  return 0.50;
+    case 'VERIFIED':    return 1.00;
+    default:            return 0.00;
+  }
+}
+
+export function classifyOutcomeReasonWeight(code: OutcomeReasonCode): number {
+  switch (code) {
+    case 'TARGET_REACHED':          return  1.00;
+    case 'SEASON_BUDGET_EXHAUSTED': return  0.15;
+    case 'NET_WORTH_COLLAPSE':      return -1.00;
+    case 'USER_ABANDON':            return -0.50;
+    case 'ENGINE_ABORT':            return -0.90;
+    case 'INTEGRITY_QUARANTINE':    return -0.80;
+    case 'UNKNOWN':                 return  0.00;
+    default:                        return  0.00;
+  }
+}
+
+export function getHaterTierWeight(id: HaterBotId): number {
+  switch (id) {
+    case 'BOT_05': return 1.00;
+    case 'BOT_04': return 0.80;
+    case 'BOT_03': return 0.60;
+    case 'BOT_02': return 0.40;
+    case 'BOT_01': return 0.20;
+    default:       return 0.00;
+  }
+}
+
+export function getModeNarrationPrefix(mode: ModeCode): string {
+  switch (mode) {
+    case 'solo':  return 'Empire —';
+    case 'pvp':   return 'Predator —';
+    case 'coop':  return 'Syndicate —';
+    case 'ghost': return 'Phantom —';
+    default:      return 'Engine —';
+  }
+}
+
+export function scoreModeCompetitiveWeight(mode: ModeCode): number {
+  switch (mode) {
+    case 'pvp':   return 1.00;
+    case 'ghost': return 0.75;
+    case 'coop':  return 0.50;
+    case 'solo':  return 0.25;
+    default:      return 0.00;
+  }
+}
+
+export function scoreEffectImpact(payload: EffectPayload): number {
+  const cashScore   = Math.abs(payload.cashDelta    ?? 0);
+  const debtScore   = Math.abs(payload.debtDelta    ?? 0) * 1.50;
+  const incomeScore = Math.abs(payload.incomeDelta  ?? 0) * 2.00;
+  const shieldScore = Math.abs(payload.shieldDelta  ?? 0);
+  const heatScore   = Math.abs(payload.heatDelta    ?? 0) * 0.50;
+  return Number(Math.min(1, (cashScore + debtScore + incomeScore + shieldScore + heatScore) / 100).toFixed(4));
+}
+
+export function scoreCardDefinition(def: CardDefinition): number {
+  const costScore   = 1 - Math.min(1, def.baseCost / 100);
+  const modeScore   = def.modeLegal.length / 4;
+  const timingScore = def.timingClass.reduce((sum, cls) => sum + scoreTimingClassWindow(cls), 0)
+    / Math.max(1, def.timingClass.length);
+  const targetScore = scoreTargetingBreadth(def.targeting);
+  return Number(((costScore + modeScore + timingScore + targetScore) / 4).toFixed(4));
+}
+
+export function scoreHandCard(card: CardInstance): number {
+  const costScore   = 1 - Math.min(1, card.cost / 100);
+  const timingScore = card.timingClass.reduce((sum, cls) => sum + scoreTimingClassWindow(cls), 0)
+    / Math.max(1, card.timingClass.length);
+  const divScore    = card.divergencePotential === 'HIGH' ? 0.75
+    : card.divergencePotential === 'MEDIUM' ? 0.50 : 0.25;
+  const modeScore   = scoreModeCompetitiveWeight(card.overlayAppliedForMode);
+  return Number(((costScore + timingScore + divScore + modeScore) / 4).toFixed(4));
+}
+
+export function scoreChainInstance(chain: CascadeChainInstance): number {
+  const polarity    = chain.positive ? 1.0 : -1.0;
+  const progress    = chain.links.length / Math.max(1, chain.links.length + 3);
+  const statusScore = chain.status === 'ACTIVE' ? 1.0
+    : chain.status === 'COMPLETED' ? 0.5 : 0.0;
+  return Number((polarity * (progress * 0.6 + statusScore * 0.4)).toFixed(4));
+}
+
+export function scoreLegendMarkerImpact(marker: LegendMarker): number {
+  const kindMap: Record<LegendMarker['kind'], number> = {
+    BLACK:  1.00,
+    GOLD:   0.85,
+    PURPLE: 0.70,
+    RED:    0.55,
+    SILVER: 0.40,
+  };
+  return kindMap[marker.kind] ?? 0.50;
+}
+
+export function computeThreatUrgency(threat: ThreatEnvelope): number {
+  const etaScore        = Math.max(0, 1 - threat.etaTicks / 10);
+  const severityScore   = Math.min(1, threat.severity / 100);
+  const visibilityScore = threat.visibleAs === 'EXPOSED'    ? 1.00
+    : threat.visibleAs === 'PARTIAL'    ? 0.60
+    : threat.visibleAs === 'SILHOUETTE' ? 0.30 : 0.10;
+  return Number(((etaScore * 0.5) + (severityScore * 0.3) + (visibilityScore * 0.2)).toFixed(4));
+}
+
+export function scoreEngineFleetHealth(health: readonly EngineHealth[]): number {
+  if (health.length === 0) return 0;
+  const total = health.reduce((sum, h) => {
+    const statusScore  = h.status === 'HEALTHY'  ? 1.0
+      : h.status === 'DEGRADED' ? 0.5 : 0.0;
+    const failureScore = h.consecutiveFailures !== undefined
+      ? Math.max(0, 1 - h.consecutiveFailures / 5) : 1.0;
+    return sum + (statusScore * 0.6 + failureScore * 0.4);
+  }, 0);
+  return Number((total / health.length).toFixed(4));
+}
+
+export function classifySignalsByCode(
+  signals: readonly EngineSignal[],
+): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const signal of signals) {
+    const key = `${signal.engineId}::${signal.code}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.freeze(counts);
+}
+
+export function computeSignalSeverityWeight(signals: readonly EngineSignal[]): number {
+  if (signals.length === 0) return 1.0;
+  const weights: Record<EngineSignal['severity'], number> = {
+    ERROR: 1.0,
+    WARN:  0.5,
+    INFO:  0.1,
+  };
+  const total = signals.reduce((sum, s) => sum + (weights[s.severity] ?? 0), 0);
+  return Number(Math.min(1, total / signals.length).toFixed(4));
+}
+
+export function extractTraceMetrics(
+  trace: TickTrace,
+): Readonly<{
+  runId: string;
+  tick: number;
+  traceId: string;
+  mode: ModeCode;
+  phase: string;
+  step: string;
+}> {
+  return Object.freeze({
+    runId:   trace.runId,
+    tick:    trace.tick,
+    traceId: trace.traceId,
+    mode:    trace.mode,
+    phase:   trace.phase,
+    step:    trace.step,
+  });
+}
+
+export function countEnvelopesByTag(
+  envelopes: readonly EngineEventEnvelope[],
+  tag: string,
+): number {
+  return envelopes.filter((e) => (e.tags ?? []).includes(tag)).length;
+}
+
+export function isHighPriorityEvent(event: keyof EngineEventMap): boolean {
+  const highPriority: ReadonlySet<keyof EngineEventMap> = new Set([
+    'run.started',
+    'shield.breached',
+    'integrity.quarantined',
+    'proof.sealed',
+    'sovereignty.completed',
+    'cascade.chain.created',
+  ] as const satisfies readonly (keyof EngineEventMap)[]);
+  return highPriority.has(event);
+}
+
+export function computeDecisionQuality(record: DecisionRecord): number {
+  if (!record.accepted) return 0;
+  const latencyScore = Math.max(0, 1 - record.latencyMs / 3000);
+  const timingScore  = record.timingClass.reduce(
+    (sum, cls) => sum + scoreTimingClassWindow(cls as TimingClass), 0,
+  ) / Math.max(1, record.timingClass.length);
+  return Number(((latencyScore * 0.6) + (timingScore * 0.4)).toFixed(4));
+}
+
+export function scoreWindowUtilization(window: RuntimeDecisionWindowSnapshot): number {
+  const frozenPenalty    = window.frozen    ? 0.50 : 1.00;
+  const consumedBonus    = window.consumed  ? 1.00 : 0.50;
+  const exclusivityBonus = window.exclusive ? 1.25 : 1.00;
+  return Number(Math.min(1, frozenPenalty * consumedBonus * exclusivityBonus * 0.80).toFixed(4));
+}
+
+export function getStepRiskProfile(
+  descriptor: TickStepDescriptor,
+): Readonly<{ phase: string; isMutating: boolean; owner: string; ordinal: number }> {
+  return Object.freeze({
+    phase:      descriptor.phase,
+    isMutating: descriptor.mutatesState,
+    owner:      descriptor.owner,
+    ordinal:    descriptor.ordinal,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § B — ML 32-dim feature vector
+// Per-tick snapshot → normalized [0,1] feature space for ML consumption.
+// Dim layout: 0-3 economy | 4-7 pressure | 8-11 shield | 12-15 battle |
+//             16-19 tension | 20-23 cascade | 24-27 card/decision | 28-31 meta
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ZeroMLFeatureLabels {
+  readonly DIM_00_ECONOMY_NET_WORTH_PROXIMITY:    number;
+  readonly DIM_01_ECONOMY_CASH_RATIO:             number;
+  readonly DIM_02_ECONOMY_CASHFLOW_RATIO:         number;
+  readonly DIM_03_ECONOMY_HATER_HEAT:             number;
+  readonly DIM_04_PRESSURE_SCORE:                 number;
+  readonly DIM_05_PRESSURE_TIER_WEIGHT:           number;
+  readonly DIM_06_PRESSURE_UPWARD_CROSSINGS:      number;
+  readonly DIM_07_PRESSURE_HIGH_TICK_SURVIVAL:    number;
+  readonly DIM_08_SHIELD_NORMALIZED_INTEGRITY:    number;
+  readonly DIM_09_SHIELD_BREACHED_LAYER_COUNT:    number;
+  readonly DIM_10_SHIELD_WEAKEST_PRIORITY:        number;
+  readonly DIM_11_SHIELD_REGEN_RATIO:             number;
+  readonly DIM_12_BATTLE_ACTIVE_BOT_COUNT:        number;
+  readonly DIM_13_BATTLE_ATTACKING_BOT_COUNT:     number;
+  readonly DIM_14_BATTLE_POSTURE_AGGREGATE:       number;
+  readonly DIM_15_BATTLE_BREACH_TARGET_COUNT:     number;
+  readonly DIM_16_TENSION_VISIBLE_THREAT_COUNT:   number;
+  readonly DIM_17_TENSION_AVG_URGENCY:            number;
+  readonly DIM_18_TENSION_MAX_SEVERITY:           number;
+  readonly DIM_19_TENSION_BREACH_SOURCE_RATIO:    number;
+  readonly DIM_20_CASCADE_POSITIVE_CHAIN_COUNT:   number;
+  readonly DIM_21_CASCADE_NEGATIVE_CHAIN_COUNT:   number;
+  readonly DIM_22_CASCADE_BROKEN_CHAIN_RATIO:     number;
+  readonly DIM_23_CASCADE_COMPLETION_RATIO:       number;
+  readonly DIM_24_CARD_HAND_SIZE:                 number;
+  readonly DIM_25_DECISION_ACCEPTANCE_RATE:       number;
+  readonly DIM_26_DECISION_AVG_LATENCY:           number;
+  readonly DIM_27_WINDOW_UTILIZATION:             number;
+  readonly DIM_28_MODE_COMPETITIVE_WEIGHT:        number;
+  readonly DIM_29_PHASE_RISK:                     number;
+  readonly DIM_30_INTEGRITY_SCORE:                number;
+  readonly DIM_31_OUTCOME_VALENCE:                number;
+}
+
+export type ZeroMLFeatureVector = readonly [
+  number, number, number, number, number, number, number, number,
+  number, number, number, number, number, number, number, number,
+  number, number, number, number, number, number, number, number,
+  number, number, number, number, number, number, number, number,
+];
+
+export const ZERO_ML_FEATURE_DIMENSION = 32 as const;
+
+export const ZERO_ML_FEATURE_LABEL_KEYS: readonly string[] = Object.freeze(
+  Object.keys({
+    DIM_00_ECONOMY_NET_WORTH_PROXIMITY:    0,
+    DIM_01_ECONOMY_CASH_RATIO:             0,
+    DIM_02_ECONOMY_CASHFLOW_RATIO:         0,
+    DIM_03_ECONOMY_HATER_HEAT:             0,
+    DIM_04_PRESSURE_SCORE:                 0,
+    DIM_05_PRESSURE_TIER_WEIGHT:           0,
+    DIM_06_PRESSURE_UPWARD_CROSSINGS:      0,
+    DIM_07_PRESSURE_HIGH_TICK_SURVIVAL:    0,
+    DIM_08_SHIELD_NORMALIZED_INTEGRITY:    0,
+    DIM_09_SHIELD_BREACHED_LAYER_COUNT:    0,
+    DIM_10_SHIELD_WEAKEST_PRIORITY:        0,
+    DIM_11_SHIELD_REGEN_RATIO:             0,
+    DIM_12_BATTLE_ACTIVE_BOT_COUNT:        0,
+    DIM_13_BATTLE_ATTACKING_BOT_COUNT:     0,
+    DIM_14_BATTLE_POSTURE_AGGREGATE:       0,
+    DIM_15_BATTLE_BREACH_TARGET_COUNT:     0,
+    DIM_16_TENSION_VISIBLE_THREAT_COUNT:   0,
+    DIM_17_TENSION_AVG_URGENCY:            0,
+    DIM_18_TENSION_MAX_SEVERITY:           0,
+    DIM_19_TENSION_BREACH_SOURCE_RATIO:    0,
+    DIM_20_CASCADE_POSITIVE_CHAIN_COUNT:   0,
+    DIM_21_CASCADE_NEGATIVE_CHAIN_COUNT:   0,
+    DIM_22_CASCADE_BROKEN_CHAIN_RATIO:     0,
+    DIM_23_CASCADE_COMPLETION_RATIO:       0,
+    DIM_24_CARD_HAND_SIZE:                 0,
+    DIM_25_DECISION_ACCEPTANCE_RATE:       0,
+    DIM_26_DECISION_AVG_LATENCY:           0,
+    DIM_27_WINDOW_UTILIZATION:             0,
+    DIM_28_MODE_COMPETITIVE_WEIGHT:        0,
+    DIM_29_PHASE_RISK:                     0,
+    DIM_30_INTEGRITY_SCORE:                0,
+    DIM_31_OUTCOME_VALENCE:                0,
+  } satisfies ZeroMLFeatureLabels),
+);
+
+function clamp01Dim(v: number): number {
+  return Math.min(1, Math.max(0, isNaN(v) ? 0 : v));
+}
+
+export function extractZeroMLFeatureVector(
+  snapshot: RunStateSnapshot,
+): ZeroMLFeatureVector {
+  // ── Economy dims 0-3 ─────────────────────────────────────────────────────
+  const netWorthProximity = snapshot.economy.freedomTarget > 0
+    ? clamp01Dim(snapshot.economy.netWorth / snapshot.economy.freedomTarget) : 0;
+  const cashRatio = snapshot.economy.netWorth > 0
+    ? clamp01Dim(snapshot.economy.cash / snapshot.economy.netWorth) : 0;
+  const cashflow      = snapshot.economy.incomePerTick - snapshot.economy.expensesPerTick;
+  const cashflowRatio = clamp01Dim((cashflow + 100) / 200);
+  const haterHeat     = clamp01Dim(snapshot.economy.haterHeat / 100);
+
+  // ── Pressure dims 4-7 ────────────────────────────────────────────────────
+  const pressureScore    = clamp01Dim(snapshot.pressure.score / 100);
+  const pressureTier     = scorePressureTierWeight(snapshot.pressure.tier);
+  const upwardCrossings  = clamp01Dim(snapshot.pressure.upwardCrossings / 20);
+  const highPressureSurv = clamp01Dim(snapshot.pressure.survivedHighPressureTicks / 50);
+
+  // ── Shield dims 8-11 ─────────────────────────────────────────────────────
+  const totalMax      = Math.max(1, snapshot.shield.layers.reduce((s, l) => s + l.max, 0));
+  const totalCurrent  = snapshot.shield.layers.reduce((s, l) => s + l.current, 0);
+  const normIntegrity = clamp01Dim(totalCurrent / totalMax);
+  const breachedCount = clamp01Dim(snapshot.shield.layers.filter((l) => l.breached).length / 4);
+  const weakestPri    = scoreShieldLayerPriority(snapshot.shield.weakestLayerId);
+  const regenRatio    = clamp01Dim(
+    snapshot.shield.layers.reduce((s, l) => s + l.regenPerTick, 0) / Math.max(1, totalMax),
+  );
+
+  // ── Battle dims 12-15 ────────────────────────────────────────────────────
+  const maxBots       = 5;
+  const activeBots    = snapshot.battle.bots.filter(
+    (b) => b.state !== 'DORMANT' && b.state !== 'NEUTRALIZED',
+  );
+  const attackingBots = snapshot.battle.bots.filter((b) => b.state === 'ATTACKING');
+  const postureAgg    = clamp01Dim(
+    activeBots.reduce((s, b) => s + scoreBotPosture(b.state), 0) / Math.max(1, activeBots.length),
+  );
+  const breachTargets = clamp01Dim(snapshot.shield.layers.filter((l) => l.breached).length / 4);
+
+  // ── Tension dims 16-19 ───────────────────────────────────────────────────
+  const visibleThreats = snapshot.tension.visibleThreats;
+  const avgUrgency     = visibleThreats.length === 0 ? 0
+    : clamp01Dim(
+        visibleThreats.reduce((s, t) => s + computeThreatUrgency(t), 0) / visibleThreats.length,
+      );
+  const maxSeverity       = visibleThreats.length === 0 ? 0
+    : clamp01Dim(Math.max(...visibleThreats.map((t) => t.severity)) / 100);
+  const breachSourceRatio = visibleThreats.length === 0 ? 0
+    : clamp01Dim(
+        visibleThreats.filter((t) => t.source.toLowerCase().includes('breach')).length
+        / visibleThreats.length,
+      );
+
+  // ── Cascade dims 20-23 ───────────────────────────────────────────────────
+  const chains          = snapshot.cascade.activeChains;
+  const positiveChains  = clamp01Dim(chains.filter((c) => c.positive).length  / 10);
+  const negativeChains  = clamp01Dim(chains.filter((c) => !c.positive).length / 10);
+  const totalActivity   = Math.max(
+    1, snapshot.cascade.brokenChains + snapshot.cascade.completedChains,
+  );
+  const brokenRatio    = clamp01Dim(snapshot.cascade.brokenChains    / totalActivity);
+  const completedRatio = clamp01Dim(snapshot.cascade.completedChains / totalActivity);
+
+  // ── Card / Decision dims 24-27 ───────────────────────────────────────────
+  const handSize      = clamp01Dim(snapshot.cards.hand.length / 10);
+  const decisions     = snapshot.telemetry.decisions;
+  const acceptRate    = decisions.length === 0 ? 0.5
+    : clamp01Dim(decisions.filter((d) => d.accepted).length / decisions.length);
+  const avgLatency    = decisions.length === 0 ? 0
+    : clamp01Dim(
+        1 - decisions.reduce((s, d) => s + d.latencyMs, 0) / (decisions.length * 3000),
+      );
+  const activeWindows = Object.values(snapshot.timers.activeDecisionWindows);
+  const windowUtil    = activeWindows.length === 0 ? 0
+    : clamp01Dim(
+        activeWindows.reduce((s, w) => s + scoreWindowUtilization(w), 0) / activeWindows.length,
+      );
+
+  // ── Meta dims 28-31 ──────────────────────────────────────────────────────
+  const modeWeight   = scoreModeCompetitiveWeight(snapshot.mode);
+  const phaseRisk    = scoreRunPhaseRisk(snapshot.phase);
+  const integrityScr = resolveIntegrityScore(snapshot.sovereignty.integrityStatus);
+  const outcomeVal   = snapshot.outcome !== null
+    ? clamp01Dim((scoreRunOutcomeValence(snapshot.outcome) + 1) / 2) : 0.5;
+
+  return Object.freeze([
+    netWorthProximity, cashRatio,            cashflowRatio,    haterHeat,
+    pressureScore,     pressureTier,         upwardCrossings,  highPressureSurv,
+    normIntegrity,     breachedCount,        weakestPri,       regenRatio,
+    clamp01Dim(activeBots.length  / maxBots),
+    clamp01Dim(attackingBots.length / maxBots),
+    postureAgg,        breachTargets,
+    clamp01Dim(visibleThreats.length / 20),
+    avgUrgency,        maxSeverity,          breachSourceRatio,
+    positiveChains,    negativeChains,       brokenRatio,      completedRatio,
+    handSize,          acceptRate,           avgLatency,       windowUtil,
+    modeWeight,        phaseRisk,            integrityScr,     outcomeVal,
+  ]) as unknown as ZeroMLFeatureVector;
+}
+
+export function featureVectorToLabels(
+  vector: ZeroMLFeatureVector,
+): ZeroMLFeatureLabels {
+  return Object.freeze({
+    DIM_00_ECONOMY_NET_WORTH_PROXIMITY:    vector[0],
+    DIM_01_ECONOMY_CASH_RATIO:             vector[1],
+    DIM_02_ECONOMY_CASHFLOW_RATIO:         vector[2],
+    DIM_03_ECONOMY_HATER_HEAT:             vector[3],
+    DIM_04_PRESSURE_SCORE:                 vector[4],
+    DIM_05_PRESSURE_TIER_WEIGHT:           vector[5],
+    DIM_06_PRESSURE_UPWARD_CROSSINGS:      vector[6],
+    DIM_07_PRESSURE_HIGH_TICK_SURVIVAL:    vector[7],
+    DIM_08_SHIELD_NORMALIZED_INTEGRITY:    vector[8],
+    DIM_09_SHIELD_BREACHED_LAYER_COUNT:    vector[9],
+    DIM_10_SHIELD_WEAKEST_PRIORITY:        vector[10],
+    DIM_11_SHIELD_REGEN_RATIO:             vector[11],
+    DIM_12_BATTLE_ACTIVE_BOT_COUNT:        vector[12],
+    DIM_13_BATTLE_ATTACKING_BOT_COUNT:     vector[13],
+    DIM_14_BATTLE_POSTURE_AGGREGATE:       vector[14],
+    DIM_15_BATTLE_BREACH_TARGET_COUNT:     vector[15],
+    DIM_16_TENSION_VISIBLE_THREAT_COUNT:   vector[16],
+    DIM_17_TENSION_AVG_URGENCY:            vector[17],
+    DIM_18_TENSION_MAX_SEVERITY:           vector[18],
+    DIM_19_TENSION_BREACH_SOURCE_RATIO:    vector[19],
+    DIM_20_CASCADE_POSITIVE_CHAIN_COUNT:   vector[20],
+    DIM_21_CASCADE_NEGATIVE_CHAIN_COUNT:   vector[21],
+    DIM_22_CASCADE_BROKEN_CHAIN_RATIO:     vector[22],
+    DIM_23_CASCADE_COMPLETION_RATIO:       vector[23],
+    DIM_24_CARD_HAND_SIZE:                 vector[24],
+    DIM_25_DECISION_ACCEPTANCE_RATE:       vector[25],
+    DIM_26_DECISION_AVG_LATENCY:           vector[26],
+    DIM_27_WINDOW_UTILIZATION:             vector[27],
+    DIM_28_MODE_COMPETITIVE_WEIGHT:        vector[28],
+    DIM_29_PHASE_RISK:                     vector[29],
+    DIM_30_INTEGRITY_SCORE:                vector[30],
+    DIM_31_OUTCOME_VALENCE:                vector[31],
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § C — DL tensor row extraction (13 steps × 10 dims per step)
+// Each StepExecutionReport is mapped to one ZeroTypesDLTensorRow. The full tensor
+// is materialized after every tick from TickExecutionSummary.
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ZeroTypesDLTensorRow {
+  readonly step:              TickStep;
+  readonly ordinal:           number;
+  readonly phaseRisk:         number;
+  readonly durationMs:        number;
+  readonly emittedEventCount: number;
+  readonly errorCount:        number;
+  readonly mutated:           number;
+  readonly signalErrorRate:   number;
+  readonly snapshotDrift:     number;
+  readonly stepScore:         number;
+}
+
+export type ZeroTypesDLTensor = readonly ZeroTypesDLTensorRow[];
+
+export const ZERO_DL_TENSOR_DIMS_PER_STEP = 10 as const;
+
+export function extractZeroTypesDLTensorRow(
+  report: StepExecutionReport,
+  engines: readonly EngineHealth[],
+  trace: TickTrace,
+): ZeroTypesDLTensorRow {
+  const phaseRisk       = scoreRunPhaseRisk(trace.phase as RunPhase);
+  const durationMs      = clamp01Dim(report.durationMs / 500);
+  const evtCount        = clamp01Dim(report.emittedEventCount / 20);
+  const errCount        = clamp01Dim(report.errors.length / 5);
+  const mutated         = report.snapshotMutated ? 1.0 : 0.0;
+  const signalErrorRate = clamp01Dim(
+    report.signals.filter((s) => s.severity === 'ERROR').length
+    / Math.max(1, report.signals.length),
+  );
+  const fleetHealth  = scoreEngineFleetHealth(engines);
+  const snapshotDrift = clamp01Dim(1 - fleetHealth);
+  const stepScore    = clamp01Dim(
+    (phaseRisk + (1 - errCount) + (1 - signalErrorRate) + fleetHealth) / 4,
+  );
+  const descriptor   = ZERO_TICK_STEP_DESCRIPTORS[report.step];
+
+  return Object.freeze({
+    step:              report.step,
+    ordinal:           descriptor.ordinal,
+    phaseRisk:         Number(phaseRisk.toFixed(4)),
+    durationMs:        Number(durationMs.toFixed(4)),
+    emittedEventCount: Number(evtCount.toFixed(4)),
+    errorCount:        Number(errCount.toFixed(4)),
+    mutated,
+    signalErrorRate:   Number(signalErrorRate.toFixed(4)),
+    snapshotDrift:     Number(snapshotDrift.toFixed(4)),
+    stepScore:         Number(stepScore.toFixed(4)),
+  });
+}
+
+export function extractZeroTypesDLTensor(
+  summary: TickExecutionSummary,
+  engines: readonly EngineHealth[],
+  trace: TickTrace,
+): ZeroTypesDLTensor {
+  return Object.freeze(
+    summary.steps.map((report) => extractZeroTypesDLTensorRow(report, engines, trace)),
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § D — Mode-native narration engine (Point Zero One witness layer)
+// The engine produces one authoritative narration line per tick reflecting
+// mode identity, phase context, social pressure, and terminal truth.
+// ────────────────────────────────────────────────────────────────────────────────
+
+export type ZeroNarrationTone =
+  | 'NEUTRAL'
+  | 'TENSE'
+  | 'TRIUMPHANT'
+  | 'CRITICAL'
+  | 'URGENT'
+  | 'REFLECTIVE';
+
+export interface ZeroNarrationLine {
+  readonly text:  string;
+  readonly tone:  ZeroNarrationTone;
+  readonly mode:  ModeCode;
+  readonly phase: RunPhase;
+  readonly tick:  number;
+  readonly tags:  readonly string[];
+}
+
+export function classifyNarrationTone(snapshot: RunStateSnapshot): ZeroNarrationTone {
+  if (snapshot.outcome !== null) {
+    return scoreRunOutcomeValence(snapshot.outcome) > 0 ? 'TRIUMPHANT' : 'CRITICAL';
+  }
+  if (snapshot.sovereignty.integrityStatus === 'QUARANTINED') return 'CRITICAL';
+  if (snapshot.pressure.score >= 80) return 'URGENT';
+  if (snapshot.pressure.score >= 55) return 'TENSE';
+  if (snapshot.phase === 'SOVEREIGNTY')  return 'REFLECTIVE';
+  return 'NEUTRAL';
+}
+
+function buildNarrationBody(
+  mode: ModeCode,
+  phase: RunPhase,
+  outcome: RunOutcome | null,
+  snapshot: RunStateSnapshot,
+  tone: ZeroNarrationTone,
+): string {
+  if (outcome === 'FREEDOM') {
+    switch (mode) {
+      case 'ghost': return "The phantom crossed the freedom line. The legend is sealed.";
+      case 'pvp':   return "Dominant. You crushed the field and claimed freedom first.";
+      case 'coop':  return "Syndicate victory. Every node held the line together.";
+      case 'solo':  return "Empire secured. Freedom claimed on your own terms.";
+    }
+  }
+  if (outcome === 'BANKRUPT') {
+    return mode === 'pvp'
+      ? "Eliminated. Predators don't wait for second chances."
+      : "Bankrupt. The pressure finally cracked the foundation.";
+  }
+  if (outcome === 'TIMEOUT')   return "Season clock expired. The window closed before freedom arrived.";
+  if (outcome === 'ABANDONED') return "Run abandoned. The engine holds the record regardless.";
+
+  if (tone === 'URGENT') {
+    return `Tick ${snapshot.tick}: Pressure at ${snapshot.pressure.score.toFixed(0)} — the system is screaming.`;
+  }
+  if (tone === 'TENSE') {
+    return `Phase ${phase} — pressure climbing, shields holding for now.`;
+  }
+  if (tone === 'REFLECTIVE') {
+    return "Sovereignty phase reached. Every decision made this possible.";
+  }
+  return `Tick ${snapshot.tick} complete. ${phase} phase continues.`;
+}
+
+function buildNarrationTags(
+  mode: ModeCode,
+  phase: RunPhase,
+  tone: ZeroNarrationTone,
+  outcome: RunOutcome | null,
+): readonly string[] {
+  const tags: string[] = [`mode:${mode}`, `phase:${phase}`, `tone:${tone}`];
+  if (outcome !== null) tags.push(`outcome:${outcome}`);
+  return Object.freeze(tags);
+}
+
+export function narrateZeroMoment(
+  snapshot: RunStateSnapshot,
+  tick: number,
+): ZeroNarrationLine {
+  const mode    = snapshot.mode;
+  const phase   = snapshot.phase;
+  const outcome = snapshot.outcome;
+  const tone    = classifyNarrationTone(snapshot);
+  const prefix  = getModeNarrationPrefix(mode);
+  const body    = buildNarrationBody(mode, phase, outcome, snapshot, tone);
+  const tags    = buildNarrationTags(mode, phase, tone, outcome);
+  return Object.freeze({ text: `${prefix} ${body}`, tone, mode, phase, tick, tags });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § E — Social pressure witness layer
+// Computes hater posture, threat convergence, and extraction risk per tick.
+// The social pressure index is the single authority signal for chat urgency.
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ZeroSocialPressureVector {
+  readonly haterAggregatePosture:  number;
+  readonly haterPresenceCount:     number;
+  readonly haterPressureByBot:     Readonly<Record<HaterBotId, number>>;
+  readonly threatConvergenceScore: number;
+  readonly extractionRiskScore:    number;
+  readonly breachRiskScore:        number;
+  readonly socialPressureIndex:    number;
+  readonly witnessLabel:           string;
+}
+
+export const ZERO_SOCIAL_PRESSURE_WITNESS_LABELS = Object.freeze([
+  'CRITICAL_SIEGE',
+  'ACTIVE_PRESSURE',
+  'BUILDING_TENSION',
+  'WATCHING_FROM_COVER',
+  'DORMANT_FIELD',
+] as const);
+
+export type ZeroSocialPressureWitnessLabel =
+  (typeof ZERO_SOCIAL_PRESSURE_WITNESS_LABELS)[number];
+
+export function computeSocialPressureVector(
+  snapshot: RunStateSnapshot,
+): ZeroSocialPressureVector {
+  const haterIds: readonly HaterBotId[] = ['BOT_01', 'BOT_02', 'BOT_03', 'BOT_04', 'BOT_05'];
+  const byBot: Record<HaterBotId, number> = {
+    BOT_01: 0, BOT_02: 0, BOT_03: 0, BOT_04: 0, BOT_05: 0,
+  };
+
+  let aggregatePosture = 0;
+  let presenceCount    = 0;
+
+  for (const bot of snapshot.battle.bots) {
+    const id = bot.botId as HaterBotId;
+    if (!haterIds.includes(id)) continue;
+    const posture  = scoreBotPosture(bot.state);
+    const tier     = getHaterTierWeight(id);
+    const combined = posture * tier;
+    byBot[id]      = Number(combined.toFixed(4));
+    aggregatePosture += combined;
+    if (bot.state !== 'DORMANT' && bot.state !== 'NEUTRALIZED') presenceCount += 1;
+  }
+
+  const normalizedPosture   = clamp01Dim(aggregatePosture / haterIds.length);
+  const visibleThreats      = snapshot.tension.visibleThreats;
+  const imminent            = visibleThreats.filter((t) => t.etaTicks <= 3);
+  const convergence         = clamp01Dim(imminent.length / 5);
+  const pendingAttacks      = snapshot.battle.pendingAttacks;
+  const extractionRisk      = clamp01Dim(
+    pendingAttacks.filter((a) => a.category === 'EXTRACTION').length / 3,
+  );
+  const breachRisk          = clamp01Dim(
+    pendingAttacks.filter((a) => a.category === 'BREACH' || a.category === 'DRAIN').length / 3,
+  );
+  const socialPressureIndex = clamp01Dim(
+    (normalizedPosture * 0.35) + (convergence * 0.25)
+    + (extractionRisk * 0.20) + (breachRisk * 0.20),
+  );
+  const witnessLabel: ZeroSocialPressureWitnessLabel =
+    socialPressureIndex >= 0.80 ? 'CRITICAL_SIEGE'
+    : socialPressureIndex >= 0.60 ? 'ACTIVE_PRESSURE'
+    : socialPressureIndex >= 0.40 ? 'BUILDING_TENSION'
+    : socialPressureIndex >= 0.20 ? 'WATCHING_FROM_COVER'
+    : 'DORMANT_FIELD';
+
+  return Object.freeze({
+    haterAggregatePosture:  Number(normalizedPosture.toFixed(4)),
+    haterPresenceCount:     presenceCount,
+    haterPressureByBot:     Object.freeze({ ...byBot }),
+    threatConvergenceScore: Number(convergence.toFixed(4)),
+    extractionRiskScore:    Number(extractionRisk.toFixed(4)),
+    breachRiskScore:        Number(breachRisk.toFixed(4)),
+    socialPressureIndex:    Number(socialPressureIndex.toFixed(4)),
+    witnessLabel,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § F — Deck, card, and legend analytics surface
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ZeroHandAnalysis {
+  readonly handSize:             number;
+  readonly avgCardScore:         number;
+  readonly bestCardInstanceId:   string | null;
+  readonly bestCardScore:        number;
+  readonly offensiveCount:       number;
+  readonly defensiveCount:       number;
+  readonly dominantTimingClass:  TimingClass | null;
+  readonly effectImpactAvg:      number;
+}
+
+export function analyzeHand(hand: readonly CardInstance[]): ZeroHandAnalysis {
+  if (hand.length === 0) {
+    return Object.freeze({
+      handSize: 0, avgCardScore: 0, bestCardInstanceId: null, bestCardScore: 0,
+      offensiveCount: 0, defensiveCount: 0, dominantTimingClass: null, effectImpactAvg: 0,
+    });
+  }
+  const scored      = hand.map((c) => ({ id: c.instanceId, score: scoreHandCard(c) }));
+  const avgScore    = scored.reduce((s, c) => s + c.score, 0) / scored.length;
+  const best        = scored.reduce((a, b) => b.score > a.score ? b : a);
+  const offCount    = hand.filter((c) => c.targeting === 'OPPONENT' || c.targeting === 'GLOBAL').length;
+  const defCount    = hand.filter((c) => c.targeting === 'SELF').length;
+  const effectAvg   = hand.reduce((s, c) => s + scoreEffectImpact(c.card.baseEffect), 0) / hand.length;
+
+  const tally = new Map<TimingClass, number>();
+  for (const card of hand) {
+    for (const cls of card.timingClass) {
+      tally.set(cls, (tally.get(cls) ?? 0) + 1);
+    }
+  }
+  let dominantCls: TimingClass | null = null;
+  let dominantCount = 0;
+  for (const [cls, count] of tally) {
+    if (count > dominantCount) { dominantCount = count; dominantCls = cls; }
+  }
+
+  return Object.freeze({
+    handSize:            hand.length,
+    avgCardScore:        Number(avgScore.toFixed(4)),
+    bestCardInstanceId:  best.id,
+    bestCardScore:       Number(best.score.toFixed(4)),
+    offensiveCount:      offCount,
+    defensiveCount:      defCount,
+    dominantTimingClass: dominantCls,
+    effectImpactAvg:     Number(effectAvg.toFixed(4)),
+  });
+}
+
+export interface ZeroLegendAnalysis {
+  readonly markerCount:          number;
+  readonly goldCount:            number;
+  readonly blackCount:           number;
+  readonly avgImpact:            number;
+  readonly peakImpact:           number;
+  readonly peakMarkerId:         string | null;
+  readonly legendPressureIndex:  number;
+}
+
+export function analyzeLegendMarkers(markers: readonly LegendMarker[]): ZeroLegendAnalysis {
+  if (markers.length === 0) {
+    return Object.freeze({
+      markerCount: 0, goldCount: 0, blackCount: 0, avgImpact: 0,
+      peakImpact: 0, peakMarkerId: null, legendPressureIndex: 0,
+    });
+  }
+  const impacts   = markers.map((m) => ({ id: m.markerId, score: scoreLegendMarkerImpact(m) }));
+  const avgImpact = impacts.reduce((s, m) => s + m.score, 0) / impacts.length;
+  const peak      = impacts.reduce((a, b) => b.score > a.score ? b : a);
+  const goldCount  = markers.filter((m) => m.kind === 'GOLD').length;
+  const blackCount = markers.filter((m) => m.kind === 'BLACK').length;
+  const pressureIdx = clamp01Dim((goldCount * 1.0 + blackCount * 0.85) / Math.max(1, markers.length));
+
+  return Object.freeze({
+    markerCount:         markers.length,
+    goldCount,
+    blackCount,
+    avgImpact:           Number(avgImpact.toFixed(4)),
+    peakImpact:          Number(peak.score.toFixed(4)),
+    peakMarkerId:        peak.id,
+    legendPressureIndex: Number(pressureIdx.toFixed(4)),
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § G — Event envelope audit helpers
+// Uses EngineEventEnvelope (wraps EventEnvelope) and EngineEventMap directly.
+// ────────────────────────────────────────────────────────────────────────────────
+
+export function auditEventEnvelopes(
+  envelopes: readonly EngineEventEnvelope[],
+): Readonly<{
+  count:             number;
+  highPriorityCount: number;
+  tagMap:            Readonly<Record<string, number>>;
+  familyMap:         Readonly<Record<string, number>>;
+}> {
+  const tagMap:    Record<string, number> = {};
+  const familyMap: Record<string, number> = {};
+  let highPriorityCount = 0;
+
+  for (const envelope of envelopes) {
+    const family = getEventFamily(envelope.event);
+    familyMap[family] = (familyMap[family] ?? 0) + 1;
+    if (isHighPriorityEvent(envelope.event)) highPriorityCount += 1;
+    for (const tag of (envelope.tags ?? [])) {
+      tagMap[tag] = (tagMap[tag] ?? 0) + 1;
+    }
+  }
+
+  return Object.freeze({
+    count: envelopes.length,
+    highPriorityCount,
+    tagMap:    Object.freeze({ ...tagMap }),
+    familyMap: Object.freeze({ ...familyMap }),
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § H — Zero types full tick analysis + analytics engine singleton
+// Computes a complete per-tick intelligence packet from all imported primitives.
+// ────────────────────────────────────────────────────────────────────────────────
+
+export interface ZeroTypesTickAnalysis {
+  readonly tick:                number;
+  readonly mode:                ModeCode;
+  readonly phase:               RunPhase;
+  readonly mlVector:            ZeroMLFeatureVector;
+  readonly dlTensor:            ZeroTypesDLTensor;
+  readonly narration:           ZeroNarrationLine;
+  readonly socialPressure:      ZeroSocialPressureVector;
+  readonly handAnalysis:        ZeroHandAnalysis;
+  readonly legendAnalysis:      ZeroLegendAnalysis;
+  readonly engineFleetScore:    number;
+  readonly signalSeverityWeight: number;
+  readonly traceMetrics:        Readonly<{ runId: string; tick: number; traceId: string; mode: ModeCode; phase: string; step: string }>;
+  readonly anomalyScore:        number;
+  readonly outcomeReasonWeight: number;
+}
+
+export function computeZeroTypesTickAnalysis(
+  summary: TickExecutionSummary,
+  snapshot: RunStateSnapshot,
+  engines: readonly EngineHealth[],
+  signals: readonly EngineSignal[],
+  trace: TickTrace,
+): ZeroTypesTickAnalysis {
+  const mlVector        = extractZeroMLFeatureVector(snapshot);
+  const dlTensor        = extractZeroTypesDLTensor(summary, engines, trace);
+  const narration       = narrateZeroMoment(snapshot, summary.tick);
+  const socialPressure  = computeSocialPressureVector(snapshot);
+  const handAnalysis    = analyzeHand(snapshot.cards.hand);
+  const legendAnalysis  = analyzeLegendMarkers(snapshot.cards.ghostMarkers);
+  const fleetScore      = scoreEngineFleetHealth(engines);
+  const signalWeight    = computeSignalSeverityWeight(signals);
+  const traceMetrics    = extractTraceMetrics(trace);
+  const reasonCode      = snapshot.telemetry.outcomeReasonCode;
+  const outcomeReasonWeight = reasonCode !== null
+    ? classifyOutcomeReasonWeight(reasonCode) : 0;
+
+  // Anomaly score: weighted deviation from ideal across key health dims
+  const idealDims = [
+    mlVector[0],   // net worth proximity
+    mlVector[8],   // normalized integrity
+    mlVector[25],  // decision acceptance rate
+    mlVector[30],  // integrity score
+    fleetScore,
+    1 - mlVector[9], // inverted breach count
+  ];
+  const anomalyScore = clamp01Dim(
+    1 - idealDims.reduce((s, d) => s + d, 0) / idealDims.length,
+  );
+
+  return Object.freeze({
+    tick:                 summary.tick,
+    mode:                 snapshot.mode,
+    phase:                snapshot.phase,
+    mlVector,
+    dlTensor,
+    narration,
+    socialPressure,
+    handAnalysis,
+    legendAnalysis,
+    engineFleetScore:     Number(fleetScore.toFixed(4)),
+    signalSeverityWeight: Number(signalWeight.toFixed(4)),
+    traceMetrics,
+    anomalyScore:         Number(anomalyScore.toFixed(4)),
+    outcomeReasonWeight:  Number(outcomeReasonWeight.toFixed(4)),
+  });
+}
+
+export class ZeroTypesAnalyticsEngine {
+  private readonly _history: ZeroTypesTickAnalysis[] = [];
+  private readonly _maxHistory: number;
+
+  constructor(maxHistory: number = 64) {
+    this._maxHistory = maxHistory;
+  }
+
+  ingest(
+    summary: TickExecutionSummary,
+    snapshot: RunStateSnapshot,
+    engines: readonly EngineHealth[],
+    signals: readonly EngineSignal[],
+    trace: TickTrace,
+  ): ZeroTypesTickAnalysis {
+    const analysis = computeZeroTypesTickAnalysis(summary, snapshot, engines, signals, trace);
+    this._history.push(analysis);
+    if (this._history.length > this._maxHistory) {
+      this._history.splice(0, this._history.length - this._maxHistory);
+    }
+    return analysis;
+  }
+
+  getHistory(): readonly ZeroTypesTickAnalysis[] {
+    return Object.freeze([...this._history]);
+  }
+
+  getLatest(): ZeroTypesTickAnalysis | null {
+    return this._history[this._history.length - 1] ?? null;
+  }
+
+  getAnomalyTrend(): readonly number[] {
+    return Object.freeze(this._history.map((a) => a.anomalyScore));
+  }
+
+  getSocialPressureTrend(): readonly number[] {
+    return Object.freeze(this._history.map((a) => a.socialPressure.socialPressureIndex));
+  }
+
+  getMLVectorHistory(): readonly ZeroMLFeatureVector[] {
+    return Object.freeze(this._history.map((a) => a.mlVector));
+  }
+
+  getNarrationHistory(): readonly ZeroNarrationLine[] {
+    return Object.freeze(this._history.map((a) => a.narration));
+  }
+
+  getSignalWeightHistory(): readonly number[] {
+    return Object.freeze(this._history.map((a) => a.signalSeverityWeight));
+  }
+
+  computeRollingAnomalyScore(window: number = 8): number {
+    const recent = this._history.slice(-window);
+    if (recent.length === 0) return 0;
+    return Number(
+      (recent.reduce((s, a) => s + a.anomalyScore, 0) / recent.length).toFixed(4),
+    );
+  }
+
+  computeRollingSocialPressure(window: number = 8): number {
+    const recent = this._history.slice(-window);
+    if (recent.length === 0) return 0;
+    return Number(
+      (recent.reduce((s, a) => s + a.socialPressure.socialPressureIndex, 0) / recent.length).toFixed(4),
+    );
+  }
+
+  computeRollingFleetHealth(window: number = 8): number {
+    const recent = this._history.slice(-window);
+    if (recent.length === 0) return 1;
+    return Number(
+      (recent.reduce((s, a) => s + a.engineFleetScore, 0) / recent.length).toFixed(4),
+    );
+  }
+
+  reset(): void {
+    this._history.length = 0;
+  }
+
+  inspect(): Readonly<{
+    historyLength:         number;
+    maxHistory:            number;
+    latestTick:            number | null;
+    rollingAnomaly:        number;
+    rollingSocialPressure: number;
+    rollingFleetHealth:    number;
+  }> {
+    return Object.freeze({
+      historyLength:         this._history.length,
+      maxHistory:            this._maxHistory,
+      latestTick:            this.getLatest()?.tick ?? null,
+      rollingAnomaly:        this.computeRollingAnomalyScore(),
+      rollingSocialPressure: this.computeRollingSocialPressure(),
+      rollingFleetHealth:    this.computeRollingFleetHealth(),
+    });
+  }
+}
+
+export const ZERO_TYPES_DEFAULT_ANALYTICS_ENGINE = new ZeroTypesAnalyticsEngine(64);
+
+// ────────────────────────────────────────────────────────────────────────────────
+// § I — Zero types version manifest and export bundle
+// ────────────────────────────────────────────────────────────────────────────────
+
+export const ZERO_TYPES_MODULE_VERSION = '2026.03.28' as const;
+
+export const ZERO_TYPES_MANIFEST = Object.freeze({
+  version:               ZERO_TYPES_MODULE_VERSION,
+  mlFeatureDimension:    ZERO_ML_FEATURE_DIMENSION,
+  dlStepCount:           ZERO_CANONICAL_TICK_SEQUENCE.length,
+  dlDimsPerStep:         ZERO_DL_TENSOR_DIMS_PER_STEP,
+  modeCount:             4 as const,
+  engineCount:           ZERO_REQUIRED_ENGINES.length,
+  lifecycleStateCount:   ZERO_RUN_LIFECYCLE_STATES.length,
+  lifecycleTransitions:  ZERO_RUN_LIFECYCLE_TRANSITIONS.length,
+  terminalPriorityCount: ZERO_TERMINAL_PRIORITY.length,
+  socialPressureLabels:  ZERO_SOCIAL_PRESSURE_WITNESS_LABELS,
+  defaultRuntimeLimits:  ZERO_DEFAULT_RUNTIME_LIMITS,
+  defaultRuntimeToggles: ZERO_DEFAULT_RUNTIME_TOGGLES,
+  defaultResetDirective: ZERO_DEFAULT_RESET_DIRECTIVE,
+  ready:                 true,
+});
+
+// ────────────────────────────────────────────────────────────────────────────────
 // end of file
 // ────────────────────────────────────────────────────────────────────────────────
