@@ -1,7 +1,7 @@
 /*
  * POINT ZERO ONE — BACKEND MODES 15X GENERATOR
  * Generated at: 2026-03-10T01:26:02.003447+00:00
- *
+ * backend/src/game/modes/shared/card_overlay.ts
  * Doctrine:
  * - backend owns mode truth, not the client
  * - four battlegrounds are materially different at runtime
