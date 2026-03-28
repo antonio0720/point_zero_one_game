@@ -4312,3 +4312,71 @@ export function computeHouseholdFinancialHealthScore(
 export function generateHouseholdStableId(prefix: string, seed: string, index: number): string {
   return stableId(prefix, seed, index);
 }
+
+/**
+ * Build a Household-specific ModeOverlay for educational card plays.
+ * Household mode reduces cost modifiers for younger players and
+ * emphasizes resilience + income tags for financial literacy.
+ */
+export function buildHouseholdModeOverlay(
+  tags: readonly CardTag[],
+  ageGroup: 'CHILD' | 'TEEN' | 'PARENT',
+): ModeOverlay {
+  const householdWeights = MODE_TAG_WEIGHT_DEFAULTS[HOUSEHOLD_BASE_MODE];
+  const tagWeights: Partial<Record<CardTag, number>> = {};
+  for (const tag of tags) {
+    tagWeights[tag] = householdWeights[tag] ?? 0;
+  }
+  const costModifier = ageGroup === 'CHILD' ? 0.5 : ageGroup === 'TEEN' ? 0.75 : 1.0;
+  return {
+    costModifier,
+    effectModifier: 1.0,
+    tagWeights,
+    timingLock: [],
+    legal: true,
+    targetingOverride: Targeting.SELF,
+    cordWeight: 1.0,
+  };
+}
+
+/**
+ * Build a DecisionEffect for a household financial action.
+ * Maps budget decisions into the replay engine's typed effect format.
+ */
+export function buildHouseholdDecisionEffect(
+  target: 'cash' | 'income' | 'expenses' | 'shield',
+  delta: number,
+): DecisionEffect {
+  return { target, delta };
+}
+
+/**
+ * Classify the educational divergence potential of a household card play.
+ * Uses CardTypesDivergencePotential to indicate how much a financial
+ * decision diverges from the optimal educational path.
+ */
+export function classifyHouseholdEducationalDivergence(
+  deckType: DeckType,
+  isOptimalChoice: boolean,
+): string {
+  if (!isOptimalChoice && (deckType === DeckType.FUBAR || deckType === DeckType.MISSED_OPPORTUNITY)) {
+    return CardTypesDivergencePotential.HIGH;
+  }
+  if (deckType === DeckType.OPPORTUNITY || deckType === DeckType.IPA) {
+    return isOptimalChoice
+      ? CardTypesDivergencePotential.LOW
+      : CardTypesDivergencePotential.MEDIUM;
+  }
+  return CardTypesDivergencePotential.LOW;
+}
+
+/**
+ * Get the counterability rating for a household card.
+ * In Household mode, most cards are NONE (no PvP), but SO cards
+ * are SOFT-counterable through budget reallocation.
+ */
+export function getHouseholdCardCounterability(deckType: DeckType): Counterability {
+  if (deckType === DeckType.SO) return Counterability.SOFT;
+  if (deckType === DeckType.FUBAR) return Counterability.HARD;
+  return Counterability.NONE;
+}
