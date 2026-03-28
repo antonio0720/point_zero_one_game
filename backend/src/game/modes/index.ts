@@ -21,3 +21,21 @@ export * from './adapters/EmpireModeAdapter';
 export * from './adapters/PredatorModeAdapter';
 export * from './adapters/SyndicateModeAdapter';
 export * from './adapters/PhantomModeAdapter';
+
+// ── Game mode implementations (namespaced to prevent collisions) ─────────────
+export * as ChaseALegendMode from './chase_a_legend_mode';
+export * as SoloMode from './solo_mode';
+export * as HeadToHeadMode from './head_to_head_mode';
+export * as TeamUpMode from './team_up_mode';
+export * as HouseholdMode from './household_mode';
+
+// ── Shared time policy ───────────────────────────────────────────────────────
+export * from './shared/TimePolicyContracts';
+export * from './shared/TimePolicyResolver';
+
+// ── Time policy adapters ─────────────────────────────────────────────────────
+export * from './adapters/ChaseLegendTimePolicyAdapter';
+export * from './adapters/SoloTimePolicyAdapter';
+export * from './adapters/HeadToHeadTimePolicyAdapter';
+export * from './adapters/TeamUpTimePolicyAdapter';
+export * from './adapters/HouseholdTimePolicyAdapter';
