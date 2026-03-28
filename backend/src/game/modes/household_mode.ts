@@ -4380,3 +4380,15 @@ export function getHouseholdCardCounterability(deckType: DeckType): Counterabili
   if (deckType === DeckType.FUBAR) return Counterability.HARD;
   return Counterability.NONE;
 }
+
+/**
+ * Map a household tick to its corresponding financial education RunPhase.
+ * Foundation = budgeting basics, Escalation = debt management,
+ * Sovereignty = investment and long-term planning.
+ */
+export function getHouseholdRunPhase(tick: number, totalTicks: number): RunPhase {
+  const progress = tick / Math.max(totalTicks, 1);
+  if (progress < 0.33) return RunPhase.FOUNDATION;
+  if (progress < 0.67) return RunPhase.ESCALATION;
+  return RunPhase.SOVEREIGNTY;
+}
