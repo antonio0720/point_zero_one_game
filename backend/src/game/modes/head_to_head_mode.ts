@@ -4640,3 +4640,63 @@ export function getPredatorCounterBBCosts(): Record<string, number> {
 export function sanitizePredatorDrawWeights(weights: readonly number[]): number[] {
   return sanitizePositiveWeights([...weights]);
 }
+
+/**
+ * Build a Predator-specific ModeOverlay for a given card.
+ * Predator mode up-weights tempo (2.4×), sabotage (2.8×), counter (2.2×),
+ * and applies a 1.4× cost modifier on privileged cards.
+ */
+export function buildPredatorModeOverlay(tags: readonly CardTag[]): ModeOverlay {
+  const predatorWeights = MODE_TAG_WEIGHT_DEFAULTS[PREDATOR_MODE];
+  const tagWeights: Partial<Record<CardTag, number>> = {};
+  for (const tag of tags) {
+    tagWeights[tag] = predatorWeights[tag] ?? 0;
+  }
+  return {
+    costModifier: 1.0,
+    effectModifier: 1.0,
+    tagWeights,
+    timingLock: [],
+    legal: true,
+    targetingOverride: Targeting.OPPONENT,
+    cordWeight: 1.0,
+  };
+}
+
+/**
+ * Build a DecisionEffect for a Predator sabotage or counter action.
+ * Maps the BB spend or damage into the replay engine's typed effect format.
+ */
+export function buildPredatorDecisionEffect(
+  target: 'cash' | 'income' | 'shield' | 'heat',
+  delta: number,
+): DecisionEffect {
+  return { target, delta };
+}
+
+/**
+ * Compute divergence potential for a card in the Predator context.
+ * Uses CardTypesDivergencePotential enum to classify how much a card
+ * changes match momentum. In Predator, sabotage and counter timing
+ * create HIGH divergence; BUILD cards are typically LOW.
+ */
+export function classifyPredatorCardDivergence(
+  deckType: DeckType,
+  isCriticalTiming: boolean,
+): string {
+  if (deckType === DeckType.SABOTAGE || deckType === DeckType.COUNTER || deckType === DeckType.BLUFF) {
+    return isCriticalTiming
+      ? CardTypesDivergencePotential.HIGH
+      : CardTypesDivergencePotential.MEDIUM;
+  }
+  return CardTypesDivergencePotential.LOW;
+}
+
+/**
+ * Get the ghost marker spec for cross-mode reference.
+ * In Predator, ghost markers are not active, but the spec data is used
+ * for cross-mode analytics and proof badge comparison.
+ */
+export function getPredatorGhostMarkerReference(kind: GhostMarkerKind) {
+  return getGhostMarkerSpec(kind);
+}
