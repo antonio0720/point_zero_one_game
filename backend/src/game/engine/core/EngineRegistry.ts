@@ -781,7 +781,7 @@ export class EngineExecutionPlan {
   }
 
   public validateDependencies(): string[] {
-    return this.build().validationErrors;
+    return [...this.build().validationErrors];
   }
 
   public canExecuteEngine(engineId: EngineId): boolean {
@@ -1917,7 +1917,7 @@ export function buildFallbackHealth(
   status: EngineHealthStatus,
   notes: string[],
 ): EngineHealth {
-  return createEngineHealth(engineId, status, notes);
+  return createEngineHealth(engineId, status, Date.now(), notes);
 }
 
 // ---------------------------------------------------------------------------

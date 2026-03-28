@@ -1541,7 +1541,7 @@ export class DecayPolicyAdvisor {
     collection: PressureSignalCollection | null,
   ): PressureCollectorWeights {
     const profile = this.controller.getProfile(snapshot);
-    const overrides: Partial<PressureCollectorWeights> = {};
+    const overrides: Partial<{ -readonly [K in keyof PressureCollectorWeights]: PressureCollectorWeights[K] }> = {};
 
     // Amplify shield weights when shield stickiness is active
     if (profile.reasons.includes('shield:weakest_below_25pct')) {

@@ -186,7 +186,7 @@ export class TimePolicyResolver {
       return snapshot;
     }
 
-    const next = cloneJson(snapshot);
+    const next = cloneJson(snapshot) as { -readonly [K in keyof RunStateSnapshot]: RunStateSnapshot[K] };
     next.timers = {
       ...next.timers,
       currentTickDurationMs: resolvedDurationMs,

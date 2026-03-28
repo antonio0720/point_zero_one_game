@@ -1876,7 +1876,7 @@ export class CardOverlayResolver {
    * Exposes SHIELD_LAYER_LABEL_BY_ID via the overlay surface.
    */
   public static getShieldLayerLabel(layerId: string): string {
-    if (SHIELD_LAYER_IDS.includes(layerId as ReturnType<typeof SHIELD_LAYER_IDS[number]>)) {
+    if (SHIELD_LAYER_IDS.includes(layerId as typeof SHIELD_LAYER_IDS[number])) {
       return SHIELD_LAYER_LABEL_BY_ID[layerId as keyof typeof SHIELD_LAYER_LABEL_BY_ID];
     }
     return layerId;

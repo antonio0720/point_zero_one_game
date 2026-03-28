@@ -437,6 +437,26 @@ export class TimePolicyResolver implements TimePolicyResolverContract {
 
     return deepFreeze(next) as RunStateSnapshot;
   }
+
+  /**
+   * Serialize the current policy version to a hash-safe string for proof chain inclusion.
+   */
+  public serializeForHash(): string {
+    return 'time-policy-v1.0';
+  }
+
+  /**
+   * Generate a diagnostic summary for the given snapshot.
+   * Used by EngineOrchestrator health reports.
+   */
+  public diagnose(
+    snapshot: RunStateSnapshot,
+    _nowMs: number,
+  ): { readonly mode: ModeCode; readonly tier: PressureTier; readonly ok: boolean } {
+    const policy = this.getPolicy(snapshot.mode);
+    const tier = snapshot.pressure.tier;
+    return { mode: policy.mode, tier, ok: true };
+  }
 }
 
 export const DEFAULT_TIME_POLICY_RESOLVER = new TimePolicyResolver();

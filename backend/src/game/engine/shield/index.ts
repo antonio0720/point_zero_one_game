@@ -526,7 +526,7 @@ export {
   generateLayerDetailLine,
   buildLayerGradeEntry,
   // Weighted integrity
-  computeWeightedIntegrity,
+  computeWeightedIntegrity as computeWeightedIntegrityV2,
   // Health reports
   buildShieldHealthReport,
   buildShieldNarrativeSummary,
