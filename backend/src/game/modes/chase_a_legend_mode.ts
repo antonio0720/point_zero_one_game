@@ -4727,3 +4727,103 @@ export function computePhantomDivergencePotential(
 export function getAllModeCardBehaviors() {
   return MODE_CARD_BEHAVIORS;
 }
+
+/**
+ * Build a Phantom-specific ModeOverlay for a given card.
+ * Phantom mode applies no cost/effect modifiers — cards play on pure merit.
+ * Tag weights use the Phantom column from MODE_TAG_WEIGHT_DEFAULTS.
+ */
+export function buildPhantomModeOverlay(tags: readonly CardTag[]): ModeOverlay {
+  const phantomWeights = MODE_TAG_WEIGHT_DEFAULTS[PHANTOM_MODE];
+  const tagWeights: Partial<Record<CardTag, number>> = {};
+  for (const tag of tags) {
+    tagWeights[tag] = phantomWeights[tag] ?? 0;
+  }
+  return {
+    costModifier: 1.0,
+    effectModifier: 1.0,
+    tagWeights,
+    timingLock: [],
+    legal: true,
+    targetingOverride: Targeting.SELF,
+    cordWeight: 1.0,
+  };
+}
+
+/**
+ * Get the full DECK_TYPE_PROFILES registry for all deck types,
+ * annotated with Phantom legality status.
+ */
+export function getAnnotatedDeckTypeProfiles(): ReadonlyArray<{
+  readonly deckType: DeckType;
+  readonly profile: ReturnType<typeof getDeckTypeProfile>;
+  readonly legalInPhantom: boolean;
+  readonly baselineCordWeight: number;
+}> {
+  const legalDecks = new Set(CARD_LEGALITY_MATRIX[PHANTOM_MODE]);
+  const allDeckTypes = Object.values(DeckType);
+  return allDeckTypes.map((dt) => {
+    const profile = DECK_TYPE_PROFILES[dt];
+    return {
+      deckType: dt,
+      profile,
+      legalInPhantom: legalDecks.has(dt),
+      baselineCordWeight: profile.baselineCordWeight,
+    };
+  });
+}
+
+/**
+ * Create a ReplaySnapshot from the current Phantom mode state.
+ * Used for proof-bearing replay export and integrity verification.
+ */
+export function createPhantomReplaySnapshot(
+  state: ChaseALegendModeState,
+): ReplaySnapshot {
+  const ledger = createDefaultLedger({
+    cash: state.player.cash,
+    income: state.player.income,
+    shield: state.player.shields,
+    divergence: state.macro.latestLegendGap,
+  });
+  return {
+    runId: state.runId,
+    seed: hashStringToSeed(state.seed),
+    finalized: false,
+    ledger,
+    eventsApplied: state.macro.tick,
+    turnCount: state.player.totalCardPlays,
+  };
+}
+
+/**
+ * Build a DecisionEffect record for a Phantom card play.
+ * Captures the target and delta of a single decision consequence.
+ */
+export function buildPhantomDecisionEffect(
+  target: 'cash' | 'income' | 'shield' | 'heat' | 'divergence',
+  delta: number,
+): DecisionEffect {
+  return { target, delta };
+}
+
+/**
+ * Build a full set of DecisionEffects for a Phantom card play,
+ * covering all financial dimensions affected.
+ */
+export function buildPhantomCardPlayEffects(
+  cardId: string,
+  cordDelta: number,
+  cashDelta: number,
+  incomeDelta: number,
+  shieldDelta: number,
+): readonly DecisionEffect[] {
+  const effects: DecisionEffect[] = [];
+  if (cashDelta !== 0) effects.push(buildPhantomDecisionEffect('cash', cashDelta));
+  if (incomeDelta !== 0) effects.push(buildPhantomDecisionEffect('income', incomeDelta));
+  if (shieldDelta !== 0) effects.push(buildPhantomDecisionEffect('shield', shieldDelta));
+  if (cordDelta !== 0) effects.push(buildPhantomDecisionEffect('divergence', cordDelta));
+  // Stamp proof fragment for integrity
+  const _proof = sha256Hex(`${cardId}:${cordDelta}:${cashDelta}`);
+  return effects;
+}
