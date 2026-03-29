@@ -193,9 +193,10 @@ export class EmpireModeAdapter implements ModeAdapter {
       }
       if (repeated) cloned.metadata['cascadeAmplifier'] = 1.5;
       if ((cloned.snapshot.pressure.tier === 'T3' || cloned.snapshot.pressure.tier === 'T4') && noShield) {
+        const adw = cloned.snapshot.timers.activeDecisionWindows as unknown as Record<string, number>;
         cloned.snapshot.timers.activeDecisionWindows = Object.fromEntries(
-          Object.entries(cloned.snapshot.timers.activeDecisionWindows as Record<string, number>).map(([key, value]) => [key, Math.max(1, Math.floor(value * 0.75))]),
-        );
+          Object.entries(adw).map(([key, value]) => [key, Math.max(1, Math.floor(value * 0.75))]),
+        ) as unknown as typeof cloned.snapshot.timers.activeDecisionWindows;
       }
 
       if (cloned.snapshot.economy.cash < 2000) {
@@ -222,7 +223,7 @@ export class EmpireModeAdapter implements ModeAdapter {
         let hint = 'Foundation remains open. Build income before the haters circle.';
         if (cloned.snapshot.phase === 'ESCALATION') hint = 'Escalation live: hesitation is extending Manipulator pressure.';
         if (cloned.snapshot.phase === 'SOVEREIGNTY') hint = 'Sovereignty live: every tick under pressure is worth more if you survive it.';
-        cloned = addForkHint(cloned, hint);
+        return addForkHint(cloned, hint);
       }
       return cloned;
     });

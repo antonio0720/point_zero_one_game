@@ -14,9 +14,16 @@ import type { CardDecisionAudit, ModeEvent, ModeFrame, ModeParticipant, PsycheSt
 import type { CardDefinition, CardInstance, ModeCode, ShieldLayerId } from '../../engine/core/GamePrimitives';
 import { MODE_TAG_WEIGHTS } from './constants';
 
+/** Strips all readonly modifiers recursively, including converting readonly arrays to mutable arrays. */
+type MutableDeep<T> =
+  T extends ReadonlyArray<infer U>
+    ? Array<MutableDeep<U>>
+    : T extends object
+    ? { -readonly [K in keyof T]: MutableDeep<T[K]> }
+    : T;
 
-export function deepClone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+export function deepClone<T>(value: T): MutableDeep<T> {
+  return JSON.parse(JSON.stringify(value)) as MutableDeep<T>;
 }
 
 export function cloneParticipant(participant: ModeParticipant): ModeParticipant {
@@ -149,23 +156,24 @@ export function averageDecisionLatencyMs(participant: ModeParticipant): number {
 }
 
 export function addForkHint(participant: ModeParticipant, hint: string): ModeParticipant {
-  const next = cloneParticipant(participant);
+  const next = deepClone(participant);
   next.snapshot.telemetry.forkHints.push(hint);
   return next;
 }
 
 export function setTimerWindow(participant: ModeParticipant, windowId: string, ticksRemaining: number): ModeParticipant {
-  const next = cloneParticipant(participant);
-  next.snapshot.timers.activeDecisionWindows[windowId] = ticksRemaining;
+  const next = deepClone(participant);
+  (next.snapshot.timers.activeDecisionWindows as unknown as Record<string, number>)[windowId] = ticksRemaining;
   return next;
 }
 
 export function countdownTimerWindows(participant: ModeParticipant): ModeParticipant {
-  const next = cloneParticipant(participant);
-  const entries = Object.entries(next.snapshot.timers.activeDecisionWindows)
+  const next = deepClone(participant);
+  const adw = next.snapshot.timers.activeDecisionWindows as unknown as Record<string, number>;
+  const entries = Object.entries(adw)
     .map(([key, value]) => [key, Math.max(0, value - 1)] as const)
     .filter(([, value]) => value > 0);
-  next.snapshot.timers.activeDecisionWindows = Object.fromEntries(entries);
+  (next.snapshot.timers as unknown as { activeDecisionWindows: Record<string, number> }).activeDecisionWindows = Object.fromEntries(entries);
   return next;
 }
 

@@ -295,7 +295,7 @@ export class TimePolicyResolver implements TimePolicyResolverContract {
       'mode' | 'seasonBudgetMs' | 'currentTickDurationMs' | 'holdCharges'
     >,
   ): TimePolicyFactoryPatch {
-    const policy = this.getPolicy(input.mode);
+    const policy = this.getPolicy(input.mode as ModeCode);
     const stableTier = policy.tiers.T1;
 
     return freezeObject({

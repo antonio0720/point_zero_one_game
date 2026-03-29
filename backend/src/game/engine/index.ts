@@ -36,10 +36,14 @@ export * as CardEffectsExecutor from './card_effects_executor';
  * - Engine.ChaseALegendMode.*
  */
 export * as TimingValidator from './timing_validator';
+export * as SoloMode from '../modes/solo_mode';
 export * as HeadToHeadMode from '../modes/head_to_head_mode';
 export * as TeamUpMode from '../modes/team_up_mode';
 export * as ChaseALegendMode from '../modes/chase_a_legend_mode';
 export * as HouseholdMode from '../modes/household_mode';
+export { getModeAdapter, listModeAdapters } from '../modes/ModeRegistry';
+export { ModeRuntimeDirector } from '../modes/ModeRuntimeDirector';
+export type { CreateFrameOptions } from '../modes/ModeRuntimeDirector';
 
 /**
  * Cards engine sub-system — compiler, executor, legality, registry,

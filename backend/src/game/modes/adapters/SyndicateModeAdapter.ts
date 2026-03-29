@@ -145,7 +145,7 @@ export class SyndicateModeAdapter implements ModeAdapter {
         (Number(participant.metadata['defectionStep'] ?? 0) * 5);
       audit.trustScore = Math.max(0, Math.min(100, 50 + deltas));
       audit.defectionRiskSignal = audit.trustScore < 35 ? 'CRITICAL' : audit.trustScore < 50 ? 'HIGH' : audit.trustScore < 70 ? 'MEDIUM' : 'LOW';
-      participant.snapshot.modeState.trustScores[participant.playerId] = audit.trustScore;
+      (participant.snapshot.modeState.trustScores as Record<string, number>)[participant.playerId] = audit.trustScore;
       if (participant.snapshot.pressure.tier === 'T4') {
         next = pushEvent(next, {
           tick: next.tick,
